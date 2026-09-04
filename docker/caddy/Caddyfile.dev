@@ -1,0 +1,19 @@
+# Ionnet Mailer — development Caddyfile (internal CA, Vite HMR)
+{
+	local_certs
+	skip_install_trust
+}
+
+mail.localhost, localhost, mta-sts.example.test, autoconfig.example.test {
+	tls internal
+	encode zstd gzip
+	@backend path /api/* /internal/* /.well-known/* /mail/config-v1.1.xml /healthz
+	handle @backend {
+		reverse_proxy app:3000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		reverse_proxy web:5173
+	}
+}

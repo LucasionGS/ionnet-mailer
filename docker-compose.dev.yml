@@ -1,0 +1,219 @@
+# Ionnet Mailer — development stack (no public DNS needed, nothing leaves the machine)
+# Usage: cp .env.example .env (defaults work), then:
+#   docker compose -f docker-compose.dev.yml up --build
+# Web UI:  https://mail.localhost:8443   (Caddy internal CA; accept the warning)
+# Mailpit: http://localhost:8825         (captures all outbound mail)
+name: ionnet-mailer-dev
+
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [mail]
+    depends_on: [app, web]
+
+  tls-sync:
+    build: ./docker/tls-sync
+    restart: unless-stopped
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mail.localhost}
+    volumes:
+      - caddy-data:/caddy:ro
+      - mail-tls:/certs
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ionmailer}
+      POSTGRES_USER: ${POSTGRES_USER:-ionmailer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      MAIL_DB_PASSWORD: ${MAIL_DB_PASSWORD:-devmailreader}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [mail]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ionmailer} -d ${POSTGRES_DB:-ionmailer}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: valkey/valkey:9-alpine
+    networks: [mail]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dovecot:
+    image: dovecot/dovecot:2.4.5-root
+    hostname: ${MAIL_HOSTNAME:-mail.localhost}
+    entrypoint: ["/entrypoint.sh"]
+    environment:
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD:-devmaster}
+      MAIL_DB_PASSWORD: ${MAIL_DB_PASSWORD:-devmailreader}
+      POSTGRES_DB: ${POSTGRES_DB:-ionmailer}
+      MAIL_NETWORK_SUBNET: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+    ports:
+      - "127.0.0.1:1143:143"
+      - "127.0.0.1:9993:993"
+      - "127.0.0.1:9995:995"
+      - "127.0.0.1:4190:4190"
+    volumes:
+      - ./docker/dovecot/entrypoint.sh:/entrypoint.sh:ro
+      - ./docker/dovecot/dovecot.conf:/etc/dovecot/dovecot.conf.template:ro
+      - ./docker/dovecot/sieve:/etc/dovecot/sieve:ro
+      - vmail:/srv/vmail
+      - mail-tls:/certs:ro
+    networks: [mail]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  postfix:
+    build: ./docker/postfix
+    hostname: ${MAIL_HOSTNAME:-mail.localhost}
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mail.localhost}
+      MAIL_DB_PASSWORD: ${MAIL_DB_PASSWORD:-devmailreader}
+      POSTGRES_DB: ${POSTGRES_DB:-ionmailer}
+      MAIL_NETWORK_SUBNET: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+      # Everything not addressed to a local virtual domain goes to Mailpit.
+      POSTFIX_RELAYHOST: "[mailpit]:1025"
+      POSTFIX_SMTP_TLS_SECURITY_LEVEL: none
+    ports:
+      - "127.0.0.1:2525:25"
+      - "127.0.0.1:4650:465"
+      - "127.0.0.1:5870:587"
+    volumes:
+      - postfix-spool:/var/spool/postfix
+      - mail-tls:/certs:ro
+    networks: [mail]
+    depends_on:
+      postgres: { condition: service_healthy }
+      dovecot: { condition: service_started }
+      rspamd: { condition: service_started }
+      mailpit: { condition: service_started }
+
+  rspamd:
+    build: ./docker/rspamd
+    environment:
+      RSPAMD_PASSWORD: ${RSPAMD_PASSWORD:-devrspamd}
+      MAIL_NETWORK_SUBNET: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+      CLAMAV_ENABLED: ${CLAMAV_ENABLED:-0}
+      RSPAMD_DEV_MODE: "1"
+    ports:
+      - "127.0.0.1:11334:11334"
+    volumes:
+      - rspamd-data:/var/lib/rspamd
+      - dkim:/var/lib/rspamd/dkim
+    networks: [mail]
+    depends_on:
+      redis: { condition: service_healthy }
+
+  clamav:
+    image: clamav/clamav:1.5
+    profiles: [clamav]
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      - clamav-db:/var/lib/clamav
+    networks: [mail]
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_DATABASE: /data/mailpit.db
+    ports:
+      - "127.0.0.1:8825:8025"
+    volumes:
+      - mailpit-data:/data
+    networks: [mail]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    command: ["sh", "-c", "pnpm install --frozen-lockfile && pnpm --filter @ionnet/server dev"]
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mail.localhost}
+      PUBLIC_URL: https://mail.localhost:8443
+      APP_SECRET: ${APP_SECRET:-dev-secret-change-me}
+      DATABASE_URL: postgres://${POSTGRES_USER:-ionmailer}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-ionmailer}
+      REDIS_URL: redis://redis:6379
+      IMAP_HOST: dovecot
+      IMAP_PORT: "143"
+      SMTP_HOST: postfix
+      SMTP_PORT: "10025"
+      DOVECOT_MASTER_USER: ionnet
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD:-devmaster}
+      RSPAMD_URL: http://rspamd:11334
+      RSPAMD_PASSWORD: ${RSPAMD_PASSWORD:-devrspamd}
+      DKIM_DIR: /dkim
+      DKIM_GID: "11333"
+      TRUST_PROXY: "1"
+      DEV_SEED: ${DEV_SEED:-1}
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - server_node_modules:/app/apps/server/node_modules
+      - web_node_modules:/app/apps/web/node_modules
+      - shared_node_modules:/app/packages/shared/node_modules
+      - dkim:/dkim
+    networks: [mail]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    command: ["sh", "-c", "pnpm install --frozen-lockfile && pnpm --filter @ionnet/web dev -- --host 0.0.0.0 --port 5173"]
+    environment:
+      VITE_PUBLIC_URL: https://mail.localhost:8443
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - server_node_modules:/app/apps/server/node_modules
+      - web_node_modules:/app/apps/web/node_modules
+      - shared_node_modules:/app/packages/shared/node_modules
+    networks: [mail]
+    depends_on: [app]
+
+networks:
+  mail:
+    ipam:
+      config:
+        - subnet: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+
+volumes:
+  caddy-data:
+  caddy-config:
+  mail-tls:
+  pgdata:
+  vmail:
+  postfix-spool:
+  rspamd-data:
+  dkim:
+  clamav-db:
+  mailpit-data:
+  node_modules:
+  server_node_modules:
+  web_node_modules:
+  shared_node_modules:

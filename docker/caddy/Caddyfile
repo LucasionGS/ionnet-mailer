@@ -1,0 +1,38 @@
+# Ionnet Mailer — production Caddyfile
+{
+	email {$ACME_EMAIL}
+	on_demand_tls {
+		# The app confirms the hostname belongs to a registered domain
+		# (mta-sts.<domain> / autoconfig.<domain>) before a cert is issued.
+		ask http://app:3000/internal/tls-allowed
+	}
+}
+
+(app) {
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+{$MAIL_HOSTNAME} {
+	import app
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+# Any other hostname: MTA-STS policy and Thunderbird autoconfig for hosted domains.
+https:// {
+	tls {
+		on_demand
+	}
+	import app
+}
+http:// {
+	redir https://{host}{uri} permanent
+}

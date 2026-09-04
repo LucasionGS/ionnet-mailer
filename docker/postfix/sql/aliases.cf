@@ -1,0 +1,8 @@
+hosts = postgres
+user = mailreader
+password = @@MAIL_DB_PASSWORD@@
+dbname = @@POSTGRES_DB@@
+# Aliases plus an identity self-map for real mailboxes so a catch-all
+# ("@domain" source) never captures mail for existing mailboxes.
+query = SELECT destination FROM aliases WHERE source = '%s' AND active
+        UNION SELECT email FROM mailboxes WHERE email = '%s' AND active

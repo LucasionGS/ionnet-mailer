@@ -1,0 +1,8 @@
+hosts = postgres
+user = mailreader
+password = @@MAIL_DB_PASSWORD@@
+dbname = @@POSTGRES_DB@@
+# Which SASL logins may use this envelope sender: the mailbox itself, plus
+# any mailbox that is the destination of an alias with this address.
+query = SELECT email FROM mailboxes WHERE email = '%s' AND active
+        UNION SELECT destination FROM aliases WHERE source = '%s' AND active

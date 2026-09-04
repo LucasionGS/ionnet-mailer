@@ -1,0 +1,202 @@
+# Ionnet Mailer — production stack
+# Usage: cp .env.example .env && edit it, then `docker compose up -d`
+# Optional antivirus: CLAMAV_ENABLED=1 docker compose --profile clamav up -d
+name: ionnet-mailer
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  caddy:
+    <<: *common
+    image: caddy:2.11-alpine
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [mail]
+    depends_on: [app]
+
+  tls-sync:
+    <<: *common
+    build: ./docker/tls-sync
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME}
+    volumes:
+      - caddy-data:/caddy:ro
+      - mail-tls:/certs
+
+  postgres:
+    <<: *common
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ionmailer}
+      POSTGRES_USER: ${POSTGRES_USER:-ionmailer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MAIL_DB_PASSWORD: ${MAIL_DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [mail]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ionmailer} -d ${POSTGRES_DB:-ionmailer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    <<: *common
+    image: valkey/valkey:9-alpine
+    command: ["valkey-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    networks: [mail]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  dovecot:
+    <<: *common
+    image: dovecot/dovecot:2.4.5-root
+    hostname: ${MAIL_HOSTNAME}
+    entrypoint: ["/entrypoint.sh"]
+    environment:
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD}
+      MAIL_DB_PASSWORD: ${MAIL_DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ionmailer}
+      MAIL_NETWORK_SUBNET: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "993:993"
+      - "995:995"
+      - "4190:4190"
+    volumes:
+      - ./docker/dovecot/entrypoint.sh:/entrypoint.sh:ro
+      - ./docker/dovecot/dovecot.conf:/etc/dovecot/dovecot.conf.template:ro
+      - ./docker/dovecot/sieve:/etc/dovecot/sieve:ro
+      - vmail:/srv/vmail
+      - mail-tls:/certs:ro
+    networks: [mail]
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "doveadm", "service", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  postfix:
+    <<: *common
+    build: ./docker/postfix
+    hostname: ${MAIL_HOSTNAME}
+    environment:
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME}
+      MAIL_DB_PASSWORD: ${MAIL_DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ionmailer}
+      MAIL_NETWORK_SUBNET: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "25:25"
+      - "465:465"
+      - "587:587"
+    volumes:
+      - postfix-spool:/var/spool/postfix
+      - mail-tls:/certs:ro
+    networks: [mail]
+    depends_on:
+      postgres: { condition: service_healthy }
+      dovecot: { condition: service_started }
+      rspamd: { condition: service_started }
+
+  rspamd:
+    <<: *common
+    build: ./docker/rspamd
+    environment:
+      RSPAMD_PASSWORD: ${RSPAMD_PASSWORD}
+      MAIL_NETWORK_SUBNET: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+      CLAMAV_ENABLED: ${CLAMAV_ENABLED:-0}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - rspamd-data:/var/lib/rspamd
+      - dkim:/var/lib/rspamd/dkim
+    networks: [mail]
+    depends_on:
+      redis: { condition: service_healthy }
+
+  clamav:
+    <<: *common
+    image: clamav/clamav:1.5
+    profiles: [clamav]
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      - clamav-db:/var/lib/clamav
+    networks: [mail]
+
+  app:
+    <<: *common
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME}
+      APP_SECRET: ${APP_SECRET}
+      DATABASE_URL: postgres://${POSTGRES_USER:-ionmailer}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ionmailer}
+      REDIS_URL: redis://redis:6379
+      IMAP_HOST: dovecot
+      IMAP_PORT: "143"
+      SMTP_HOST: postfix
+      SMTP_PORT: "10025"
+      DOVECOT_MASTER_USER: ionnet
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD}
+      RSPAMD_URL: http://rspamd:11334
+      RSPAMD_PASSWORD: ${RSPAMD_PASSWORD}
+      DKIM_DIR: /dkim
+      DKIM_GID: "11333"
+      TRUST_PROXY: "1"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - dkim:/dkim
+    networks: [mail]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  mail:
+    ipam:
+      config:
+        - subnet: ${MAIL_NETWORK_SUBNET:-172.28.0.0/24}
+
+volumes:
+  caddy-data:
+  caddy-config:
+  mail-tls:
+  pgdata:
+  redis-data:
+  vmail:
+  postfix-spool:
+  rspamd-data:
+  dkim:
+  clamav-db:

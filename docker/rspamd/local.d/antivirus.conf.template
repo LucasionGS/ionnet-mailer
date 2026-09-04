@@ -1,0 +1,13 @@
+# Only installed as local.d/antivirus.conf when CLAMAV_ENABLED=1.
+clamav {
+  type = "clamav";
+  servers = "clamav:3310";
+  action = "reject";
+  message = "${SCANNER}: virus found: \"${VIRUS}\"";
+  symbol = "CLAM_VIRUS";
+  scan_mime_parts = true;
+  max_size = 20000000;
+  retransmits = 1;
+  timeout = 15.0;
+  log_clean = false;
+}

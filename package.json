@@ -1,0 +1,16 @@
+{
+  "name": "ionnet-mailer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ionnet Mailer — self-hosted mail server with a modern web client",
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "dev": "docker compose -f docker-compose.dev.yml up --build",
+    "dev:down": "docker compose -f docker-compose.dev.yml down",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "seed": "pnpm --filter @ionnet/server seed"
+  }
+}
