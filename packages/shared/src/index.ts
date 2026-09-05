@@ -508,6 +508,18 @@ export const MailEventSchema = z.discriminatedUnion("type", [
 ]);
 export type MailEvent = z.infer<typeof MailEventSchema>;
 
+// The SSE stream names every frame after its `type`, and EventSource only routes
+// unnamed frames to `onmessage`, so the client has to subscribe to each name.
+// `satisfies` keeps this exhaustive as the union above grows.
+const MAIL_EVENT_TYPE_KEYS = {
+  new: true,
+  expunge: true,
+  flags: true,
+  folders: true,
+  ping: true,
+} as const satisfies Record<MailEvent["type"], true>;
+export const MAIL_EVENT_TYPES = Object.keys(MAIL_EVENT_TYPE_KEYS) as Array<MailEvent["type"]>;
+
 // ---------------------------------------------------------------------------
 // Contacts
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { ApiError, DraftRequest, MailEvent, SendRequest } from "@ionnet/shared";
+import { MAIL_EVENT_TYPES, type ApiError, type DraftRequest, type MailEvent, type SendRequest } from "@ionnet/shared";
 
 export class ApiClientError extends Error {
   status: number;
@@ -110,31 +110,42 @@ export function rawMessageUrl(folder: string, uid: number): string {
   return `/api/mail/messages/${encodeURIComponent(folder)}/${uid}/raw`;
 }
 
-/** Subscribe to mail events. Returns an unsubscribe function. */
+/**
+ * Subscribe to mail events. Returns an unsubscribe function.
+ *
+ * `onStatus` fires on every connect/disconnect: events that arrive while the
+ * stream is down are lost, so callers should resync their cache on reconnect.
+ */
 export function subscribeMailEvents(onEvent: (e: MailEvent) => void, onStatus?: (connected: boolean) => void): () => void {
   let es: EventSource | null = null;
   let closed = false;
   let retry = 1000;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
+  const handle = (ev: MessageEvent<string>) => {
+    try {
+      onEvent(JSON.parse(ev.data) as MailEvent);
+    } catch {
+      // ignore malformed
+    }
+  };
+
   const connect = () => {
     if (closed) return;
-    es = new EventSource("/api/mail/events", { withCredentials: true });
-    es.onopen = () => {
+    const src = new EventSource("/api/mail/events", { withCredentials: true });
+    es = src;
+    src.onopen = () => {
       retry = 1000;
       onStatus?.(true);
     };
-    es.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data) as MailEvent;
-        onEvent(data);
-      } catch {
-        // ignore malformed
-      }
-    };
-    es.onerror = () => {
+    // The server tags each frame with its event type, so `onmessage` — which only
+    // sees frames without an `event:` line — never fires. Subscribe by name.
+    for (const type of MAIL_EVENT_TYPES) src.addEventListener(type, handle);
+    src.onmessage = handle;
+    src.onerror = () => {
+      if (es !== src) return;
       onStatus?.(false);
-      es?.close();
+      src.close();
       es = null;
       if (!closed) {
         timer = setTimeout(connect, retry);
@@ -147,5 +158,6 @@ export function subscribeMailEvents(onEvent: (e: MailEvent) => void, onStatus?: 
     closed = true;
     if (timer) clearTimeout(timer);
     es?.close();
+    es = null;
   };
 }
