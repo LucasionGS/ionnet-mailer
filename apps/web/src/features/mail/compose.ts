@@ -47,8 +47,8 @@ function forwardHeader(m: Message): string {
   );
 }
 
-function withSignature(html: string, me: Me): string {
-  if (!me.signature) return html;
+function withSignature(html: string, me: Me | undefined): string {
+  if (!me?.signature) return html;
   const sig = me.signature.includes("<") ? me.signature : textToHtml(me.signature);
   return `<p></p><div class="ionnet-signature">-- <br>${sig}</div>${html}`;
 }
@@ -92,7 +92,7 @@ export function forwardInit(m: Message, me: Me): ComposerInit {
   };
 }
 
-export function newMessageInit(me: Me, to: Recipient[] = []): ComposerInit {
+export function newMessageInit(me: Me | undefined, to: Recipient[] = []): ComposerInit {
   return { mode: "new", to, html: withSignature("", me) };
 }
 

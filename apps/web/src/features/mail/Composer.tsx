@@ -20,6 +20,11 @@ function stripHtml(html: string): string {
   return (d.textContent ?? "").trim();
 }
 
+/** The pre-filled body (signature, quote) doesn't count as content until the user edits it. */
+function hasBody(html: string, initialHtml: string): boolean {
+  return html !== initialHtml && stripHtml(html).length > 0;
+}
+
 export function Composer({ state, me }: { state: ComposerState; me: Me }) {
   const qc = useQueryClient();
   const [to, setTo] = useState<Recipient[]>(state.to);
@@ -38,6 +43,7 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
   const dirty = useRef(false);
   const lastSaved = useRef<string>("");
   const htmlRef = useRef(state.html);
+  const initialHtml = useRef(state.html);
   const fileInput = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -78,7 +84,7 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
     async (silent = true) => {
       const snap = snapshot();
       if (snap === lastSaved.current) return;
-      if (!to.length && !cc.length && !bcc.length && !subject.trim() && !stripHtml(htmlRef.current) && !files.length) return;
+      if (!to.length && !cc.length && !bcc.length && !subject.trim() && !hasBody(htmlRef.current, initialHtml.current) && !files.length) return;
       setSaving(true);
       try {
         const body: DraftRequest = { ...payloadBase(), draftUid: draftUid.current };
@@ -160,7 +166,7 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
     // A draft that already exists on the server stays in Drafts; the user can delete it there.
   };
 
-  const hasContent = to.length || cc.length || bcc.length || subject.trim() || stripHtml(htmlRef.current).length > 0 || files.length;
+  const hasContent = to.length || cc.length || bcc.length || subject.trim() || hasBody(htmlRef.current, initialHtml.current) || files.length;
   const title = subject.trim() || (state.mode === "new" ? "New message" : state.mode === "forward" ? "Forward" : "Reply");
 
   if (state.minimized) {
