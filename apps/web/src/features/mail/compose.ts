@@ -53,7 +53,7 @@ function forwardHeader(m: Message): string {
  */
 export function withSignature(html: string, signature: string): string {
   const sig = signature.includes("<") ? signature : textToHtml(signature);
-  const block = `<div class="ionnet-signature">-- <br>${sig}</div>`;
+  const block = `<div class="ionnet-signature" style="margin:16px 0;padding-top:12px;border-top:1px solid #d0d5dc;">${sig}</div>`;
   const quote = /<div class="ionnet-(?:quote|forward)">/.exec(html);
   return quote ? html.slice(0, quote.index) + block + html.slice(quote.index) : html + block;
 }

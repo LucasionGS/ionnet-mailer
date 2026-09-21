@@ -16,6 +16,7 @@ export interface ComposeInput {
 function flowToText(html: string): string {
   return html
     .replace(/[ \t\r\n\f]+/g, " ")
+    .replace(/<div class="ionnet-signature"[^>]*>/gi, "\n-- \n") // the HTML divider line, as the standard plain-text delimiter
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h[1-6]|tr|table|blockquote)>/gi, "\n")
     .replace(/<\/t[dh]>/gi, " ")
