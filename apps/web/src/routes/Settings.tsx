@@ -85,7 +85,7 @@ export function SettingsPage() {
             <Field label="Display name" hint="Shown as the sender name on outgoing mail.">
               <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={120} />
             </Field>
-            <Field label="Signature" hint="Appended to new messages. Plain text or simple HTML.">
+            <Field label="Signature" hint="Added below your message when sending; you can turn it off per email. Plain text or HTML.">
               <Textarea value={signature} onChange={(e) => setSignature(e.target.value)} rows={4} />
             </Field>
             <div className="flex justify-end">

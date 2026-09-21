@@ -12,19 +12,33 @@ export interface ComposeInput {
   original: { messageId: string | null; references: string[] } | null;
 }
 
-export function htmlToText(html: string): string {
+/** Text for HTML outside <pre>: source whitespace isn't significant there, so pretty-printed markup (e.g. a table signature) doesn't leak its indentation. */
+function flowToText(html: string): string {
   return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/[ \t\r\n\f]+/g, " ")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr|blockquote)>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr|table|blockquote)>/gi, "\n")
+    .replace(/<\/t[dh]>/gi, " ")
     .replace(/<li[^>]*>/gi, "- ")
     .replace(/<[^>]+>/g, "")
+    .replace(/ {2,}/g, " ")
+    .replace(/^ +/gm, "")
+    .replace(/(?<!^--) +$/gm, ""); // keep the "-- " signature delimiter intact
+}
+
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .split(/(<pre\b[\s\S]*?<\/pre>)/i)
+    .map((part, i) => (i % 2 ? `\n${part.replace(/<[^>]+>/g, "")}\n` : flowToText(part)))
+    .join("")
     .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, "&")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { EditorContent, useEditor, type Editor as TiptapEditor } from "@tiptap/react";
+import { EditorContent, Node, useEditor, type Editor as TiptapEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -7,6 +7,29 @@ import Image from "@tiptap/extension-image";
 import { Bold, Code, Italic, Link2, List, ListOrdered, Quote, RemoveFormatting, Underline as UnderlineIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { IconButton } from "@/components/ui";
+
+/** Keeps the wrapper around quoted/forwarded originals, so the signature can be placed above it on send. */
+const QuotedOriginal = Node.create({
+  name: "quotedOriginal",
+  group: "block",
+  content: "block+",
+  defining: true,
+  addAttributes() {
+    return {
+      kind: {
+        default: "quote",
+        parseHTML: (el) => (el.classList.contains("ionnet-forward") ? "forward" : "quote"),
+        renderHTML: () => ({}),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "div.ionnet-quote" }, { tag: "div.ionnet-forward" }];
+  },
+  renderHTML({ node }) {
+    return ["div", { class: `ionnet-${node.attrs.kind}` }, 0];
+  },
+});
 
 function ToolbarButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -70,6 +93,7 @@ export function useMailEditor(initialHtml: string, onUpdate: (html: string) => v
       Link.configure({ openOnClick: false, autolink: true, defaultProtocol: "https" }),
       Placeholder.configure({ placeholder }),
       Image.configure({ inline: true, allowBase64: true }),
+      QuotedOriginal,
     ],
     content: initialHtml,
     autofocus: false,

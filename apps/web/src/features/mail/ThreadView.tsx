@@ -59,7 +59,7 @@ export function ThreadView({
 
   const onReply = (m: Message) => openComposer(replyInit(m, me, false));
   const onReplyAll = (m: Message) => openComposer(replyInit(m, me, true));
-  const onForward = (m: Message) => openComposer(forwardInit(m, me));
+  const onForward = (m: Message) => openComposer(forwardInit(m));
   const onEditDraft = (m: Message) => openComposer(draftInit(m));
   const onDelete = (m: Message) => {
     const inTrash = actions.folders?.find((f) => f.path === m.folder)?.specialUse === "trash";

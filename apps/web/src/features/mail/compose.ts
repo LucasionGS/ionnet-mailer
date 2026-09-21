@@ -47,10 +47,24 @@ function forwardHeader(m: Message): string {
   );
 }
 
-function withSignature(html: string, me: Me | undefined): string {
-  if (!me?.signature) return html;
-  const sig = me.signature.includes("<") ? me.signature : textToHtml(me.signature);
-  return `<p></p><div class="ionnet-signature">-- <br>${sig}</div>${html}`;
+/**
+ * Add the signature, untouched, to the composed body: above the quoted/forwarded original if there is one,
+ * otherwise at the end. It never goes through the editor, which would strip tables, styles and the like.
+ */
+export function withSignature(html: string, signature: string): string {
+  const sig = signature.includes("<") ? signature : textToHtml(signature);
+  const block = `<div class="ionnet-signature">-- <br>${sig}</div>`;
+  const quote = /<div class="ionnet-(?:quote|forward)">/.exec(html);
+  return quote ? html.slice(0, quote.index) + block + html.slice(quote.index) : html + block;
+}
+
+/** Drafts are saved with the signature included; take it back out so it doesn't end up in the editor. */
+function withoutSignature(html: string): { html: string; signature: boolean } {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const sig = doc.body.querySelector(":scope > .ionnet-signature");
+  if (!sig) return { html, signature: false };
+  sig.remove();
+  return { html: doc.body.innerHTML, signature: true };
 }
 
 function rePrefix(subject: string, prefix: "Re" | "Fwd"): string {
@@ -70,19 +84,19 @@ export function replyInit(m: Message, me: Me, all: boolean): ComposerInit {
     to: finalTo,
     cc,
     subject: rePrefix(m.subject, "Re"),
-    html: withSignature(quotedBlock(m), me),
+    html: quotedBlock(m),
     inReplyTo: { folder: m.folder, uid: m.uid },
     replyMode: "reply",
     original: m,
   };
 }
 
-export function forwardInit(m: Message, me: Me): ComposerInit {
+export function forwardInit(m: Message): ComposerInit {
   return {
     mode: "forward",
     to: [],
     subject: rePrefix(m.subject, "Fwd"),
-    html: withSignature(forwardHeader(m), me),
+    html: forwardHeader(m),
     inReplyTo: { folder: m.folder, uid: m.uid },
     replyMode: "forward",
     forwardAttachments: m.attachments
@@ -92,18 +106,16 @@ export function forwardInit(m: Message, me: Me): ComposerInit {
   };
 }
 
-export function newMessageInit(me: Me | undefined, to: Recipient[] = []): ComposerInit {
-  return { mode: "new", to, html: withSignature("", me) };
-}
-
 export function draftInit(m: Message): ComposerInit {
+  const body = withoutSignature(m.html ?? (m.text ? textToHtml(m.text) : ""));
   return {
     mode: "draft",
     to: m.to,
     cc: m.cc,
     bcc: m.bcc,
     subject: m.subject,
-    html: m.html ?? (m.text ? textToHtml(m.text) : ""),
+    html: body.html,
+    signature: body.signature,
     draftUid: m.uid,
     original: m,
   };

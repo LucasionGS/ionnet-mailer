@@ -10,7 +10,6 @@ import { ThreadList } from "@/features/mail/ThreadList";
 import { ThreadView } from "@/features/mail/ThreadView";
 import { useMailActions } from "@/features/mail/useMailActions";
 import { isComposerOpen, openComposer } from "@/features/mail/composerStore";
-import { newMessageInit } from "@/features/mail/compose";
 import { useTheme } from "@/lib/theme";
 
 function useIsDark() {
@@ -219,7 +218,7 @@ export function MailPage() {
           break;
         case "c":
           e.preventDefault();
-          if (me) openComposer(newMessageInit(me));
+          openComposer();
           break;
         case "/":
           e.preventDefault();

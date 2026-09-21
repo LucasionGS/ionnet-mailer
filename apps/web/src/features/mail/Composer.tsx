@@ -7,10 +7,12 @@ import { errorMessage, saveDraft, sendMail } from "@/lib/api";
 import { invalidateMail } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { Button, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
+import { Button, Checkbox, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
 import { closeComposer, updateComposer, type ComposerState, type Recipient } from "./composerStore";
 import { RecipientInput } from "./RecipientInput";
 import { EditorArea, EditorToolbar, useMailEditor } from "./Editor";
+import { HtmlFrame } from "./HtmlFrame";
+import { withSignature } from "./compose";
 
 const MAX_TOTAL = 40 * 1024 * 1024;
 
@@ -18,11 +20,6 @@ function stripHtml(html: string): string {
   const d = document.createElement("div");
   d.innerHTML = html;
   return (d.textContent ?? "").trim();
-}
-
-/** The pre-filled body (signature, quote) doesn't count as content until the user edits it. */
-function hasBody(html: string, initialHtml: string): boolean {
-  return html !== initialHtml && stripHtml(html).length > 0;
 }
 
 export function Composer({ state, me }: { state: ComposerState; me: Me }) {
@@ -35,6 +32,8 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
   const [subject, setSubject] = useState(state.subject);
   const [files, setFiles] = useState<File[]>([]);
   const [forwardAtt, setForwardAtt] = useState(state.forwardAttachments);
+  const [includeSignature, setIncludeSignature] = useState(state.signature);
+  const signature = includeSignature ? me.signature : null;
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -43,7 +42,6 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
   const dirty = useRef(false);
   const lastSaved = useRef<string>("");
   const htmlRef = useRef(state.html);
-  const initialHtml = useRef(state.html);
   const fileInput = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -59,8 +57,8 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
   }, [editor, state.mode, to.length]);
 
   const snapshot = useCallback(
-    () => JSON.stringify({ to, cc, bcc, subject, html: htmlRef.current, files: files.map((f) => f.name + f.size), forwardAtt }),
-    [to, cc, bcc, subject, files, forwardAtt],
+    () => JSON.stringify({ to, cc, bcc, subject, html: htmlRef.current, signature, files: files.map((f) => f.name + f.size), forwardAtt }),
+    [to, cc, bcc, subject, signature, files, forwardAtt],
   );
 
   const payloadBase = useCallback(
@@ -69,7 +67,7 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
       cc,
       bcc,
       subject,
-      html: htmlRef.current,
+      html: signature ? withSignature(htmlRef.current, signature) : htmlRef.current,
       fromName: me.displayName,
       fromAddress: me.email,
       inReplyTo: state.inReplyTo,
@@ -77,14 +75,14 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
       forwardAttachments: forwardAtt.map((a) => ({ ref: a.ref, partId: a.partId })),
       requestReadReceipt: false,
     }),
-    [to, cc, bcc, subject, me, state.inReplyTo, state.replyMode, forwardAtt],
+    [to, cc, bcc, subject, signature, me, state.inReplyTo, state.replyMode, forwardAtt],
   );
 
   const doSaveDraft = useCallback(
     async (silent = true) => {
       const snap = snapshot();
       if (snap === lastSaved.current) return;
-      if (!to.length && !cc.length && !bcc.length && !subject.trim() && !hasBody(htmlRef.current, initialHtml.current) && !files.length) return;
+      if (!to.length && !cc.length && !bcc.length && !subject.trim() && !stripHtml(htmlRef.current) && !files.length) return;
       setSaving(true);
       try {
         const body: DraftRequest = { ...payloadBase(), draftUid: draftUid.current };
@@ -115,7 +113,7 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [to, cc, bcc, subject, files, forwardAtt, scheduleSave]);
+  }, [to, cc, bcc, subject, signature, files, forwardAtt, scheduleSave]);
 
   const totalSize = useMemo(() => files.reduce((s, f) => s + f.size, 0) + forwardAtt.reduce((s, a) => s + a.size, 0), [files, forwardAtt]);
 
@@ -166,7 +164,7 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
     // A draft that already exists on the server stays in Drafts; the user can delete it there.
   };
 
-  const hasContent = to.length || cc.length || bcc.length || subject.trim() || hasBody(htmlRef.current, initialHtml.current) || files.length;
+  const hasContent = to.length || cc.length || bcc.length || subject.trim() || stripHtml(htmlRef.current).length > 0 || files.length;
   const title = subject.trim() || (state.mode === "new" ? "New message" : state.mode === "forward" ? "Forward" : "Reply");
 
   if (state.minimized) {
@@ -264,6 +262,20 @@ export function Composer({ state, me }: { state: ComposerState; me: Me }) {
         </div>
 
         <EditorArea editor={editor} className={cn(dragging && "bg-accent-soft/40")} />
+
+        {me.signature && (
+          <div className="border-t px-3 py-2">
+            <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-fg-muted">
+              <Checkbox checked={includeSignature} onChange={setIncludeSignature} label="Add signature" />
+              Add signature
+            </label>
+            {signature && (
+              <div className="scroll-thin mt-2 max-h-28 overflow-y-auto rounded-md border bg-white px-2">
+                <HtmlFrame html={withSignature("", signature)} allowRemote dark={false} />
+              </div>
+            )}
+          </div>
+        )}
 
         {(files.length > 0 || forwardAtt.length > 0) && (
           <div className="flex flex-wrap gap-1.5 border-t px-3 py-2">

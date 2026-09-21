@@ -20,6 +20,8 @@ export interface ComposerState {
   replyMode: "reply" | "forward" | null;
   forwardAttachments: Array<{ ref: MessageRef; partId: string; filename: string; size: number }>;
   draftUid: number | null;
+  /** add the user's signature on send (only applies when they have one) */
+  signature: boolean;
   minimized: boolean;
   expanded: boolean;
   /** original message when replying/forwarding (for quoting) */
@@ -48,6 +50,7 @@ export function openComposer(init: ComposerInit = {}) {
     replyMode: init.replyMode ?? null,
     forwardAttachments: init.forwardAttachments ?? [],
     draftUid: init.draftUid ?? null,
+    signature: init.signature ?? true,
     original: init.original ?? null,
     minimized: false,
     expanded: false,

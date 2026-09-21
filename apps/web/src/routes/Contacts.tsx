@@ -1,19 +1,17 @@
 import { useState } from "react";
 import { BookUser, Mail, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import type { Contact } from "@ionnet/shared";
-import { useContacts, useDeleteContact, useMe } from "@/lib/queries";
+import { useContacts, useDeleteContact } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { avatarColor, cn, initials } from "@/lib/utils";
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, IconButton, Input, PageSpinner } from "@/components/ui";
 import { ContactDialog } from "@/features/contacts/ContactDialog";
 import { openComposer } from "@/features/mail/composerStore";
-import { newMessageInit } from "@/features/mail/compose";
 
 export function ContactsPage() {
   const [q, setQ] = useState("");
   const { data, isLoading, error, refetch } = useContacts(q);
-  const { data: me } = useMe();
   const [editing, setEditing] = useState<Contact | null | "new">(null);
   const [deleting, setDeleting] = useState<Contact | null>(null);
   const del = useDeleteContact();
@@ -70,7 +68,7 @@ export function ContactsPage() {
                   <IconButton
                     label="Send email"
                     size="sm"
-                    onClick={() => openComposer(newMessageInit(me, [{ name: c.name, address: c.emails[0] ?? "" }]))}
+                    onClick={() => openComposer({ to: [{ name: c.name, address: c.emails[0] ?? "" }] })}
                   >
                     <Mail size={14} />
                   </IconButton>

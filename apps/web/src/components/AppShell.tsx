@@ -7,7 +7,6 @@ import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./ui/Menu";
 import { Tooltip } from "./ui/Tooltip";
 import { Composer } from "@/features/mail/Composer";
 import { openComposer, useComposer } from "@/features/mail/composerStore";
-import { newMessageInit } from "@/features/mail/compose";
 import { useMailEvents } from "@/features/mail/useMailEvents";
 import { APP_NAME } from "@ionnet/shared";
 
@@ -72,7 +71,7 @@ export function AppShell() {
         <Tooltip content="Compose (c)" side="right">
           <button
             type="button"
-            onClick={() => openComposer(newMessageInit(me))}
+            onClick={() => openComposer()}
             className="focus-ring mb-2 flex h-10 w-10 items-center justify-center rounded-xl border border-border-strong bg-surface text-fg shadow-sm transition-colors hover:bg-surface-2"
             aria-label="Compose"
           >
