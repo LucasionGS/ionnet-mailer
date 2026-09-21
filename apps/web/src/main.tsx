@@ -6,6 +6,7 @@ import { createAppRouter } from "./router";
 import { apply as applyTheme } from "./lib/theme";
 import { Toaster } from "./lib/toast";
 import { TooltipProvider } from "./components/ui/Tooltip";
+import "@fontsource-variable/inter";
 import "./index.css";
 
 applyTheme();

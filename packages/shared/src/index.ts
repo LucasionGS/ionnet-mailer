@@ -125,6 +125,8 @@ export const MeSchema = z.object({
   isAdmin: z.boolean(),
   signature: z.string().nullable(),
   quotaBytes: z.number(),
+  /** addresses this user may send from: their own first, then aliases that deliver to them */
+  sendAs: z.array(z.string()).default([]),
 });
 export type Me = z.infer<typeof MeSchema>;
 

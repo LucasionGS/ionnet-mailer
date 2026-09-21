@@ -4,13 +4,14 @@ import { Op } from "sequelize";
 import { DraftRequestSchema, SendRequestSchema, type Address } from "@ionnet/shared";
 import type { AppEnv } from "../http/types.ts";
 import { config } from "../config.ts";
-import { AliasRow, ContactRow, MailboxRow, RecentAddress } from "../db/models.ts";
+import { ContactRow, MailboxRow, RecentAddress } from "../db/models.ts";
 import { badRequest, forbidden } from "../errors.ts";
 import { parseWith } from "../http/validate.ts";
 import { pool } from "../mail/pool.ts";
 import { findSpecialFolder } from "../mail/folders.ts";
 import { loadMessage, invalidate } from "../mail/message.ts";
 import { buildMime, type ComposeInput } from "./compose.ts";
+import { allowedSenders } from "./senders.ts";
 import { logger } from "../logger.ts";
 
 const log = logger("send");
@@ -38,12 +39,6 @@ async function readForm(c: Context<AppEnv>) {
     uploads.push({ filename: f.name || "attachment", contentType: f.type || "application/octet-stream", content: Buffer.from(await f.arrayBuffer()) });
   }
   return { payload, uploads };
-}
-
-/** Addresses this user may put in From: their mailbox plus aliases that deliver to them. */
-async function allowedSenders(user: MailboxRow): Promise<string[]> {
-  const aliases = await AliasRow.findAll({ where: { destination: user.email, active: true, source: { [Op.notLike]: "@%" } } });
-  return [user.email, ...aliases.map((a) => a.source)];
 }
 
 async function resolveFrom(user: MailboxRow, fromAddress?: string, fromName?: string): Promise<Address> {

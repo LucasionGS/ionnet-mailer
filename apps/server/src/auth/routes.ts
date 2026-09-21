@@ -8,9 +8,10 @@ import { createSession, destroySession } from "./session.ts";
 import { clearFailures, isLocked, recordFailure } from "./ratelimit.ts";
 import { requireAuth } from "../http/middleware.ts";
 import { tooMany, unauthorized } from "../errors.ts";
+import { allowedSenders } from "../send/senders.ts";
 
 export async function toMe(user: MailboxRow): Promise<Me> {
-  const domain = await Domain.findByPk(user.domainId);
+  const [domain, sendAs] = await Promise.all([Domain.findByPk(user.domainId), allowedSenders(user)]);
   return {
     id: user.id,
     email: user.email,
@@ -19,6 +20,7 @@ export async function toMe(user: MailboxRow): Promise<Me> {
     isAdmin: user.isAdmin,
     signature: user.signature ?? null,
     quotaBytes: Number(user.quotaBytes),
+    sendAs,
   };
 }
 

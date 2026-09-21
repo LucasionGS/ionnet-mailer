@@ -73,14 +73,14 @@ export function RecipientInput({
   const invalid = text.trim().length > 0 && !parseEntry(text) && !open;
 
   return (
-    <div className="flex items-start gap-2 border-b px-3 py-1.5">
-      <span className="w-8 shrink-0 pt-1.5 text-xs text-fg-muted">{label}</span>
+    <div className="flex items-start gap-2 border-b px-4 py-1 transition-colors focus-within:bg-surface-2/40">
+      <span className="w-10 shrink-0 pt-1.5 text-xs text-fg-muted">{label}</span>
       <div className="relative min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1" onClick={() => inputRef.current?.focus()}>
           {value.map((r) => (
             <span
               key={r.address}
-              className="flex max-w-full items-center gap-1 rounded-full border bg-surface-2 py-0.5 pr-1 pl-0.5 text-xs"
+              className="flex max-w-full items-center gap-1 rounded-full border bg-surface py-0.5 pr-1 pl-0.5 text-xs transition-colors hover:border-border-strong"
               title={r.address}
             >
               <span className="flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-semibold text-white" style={{ background: avatarColor(r.address) }}>
@@ -136,14 +136,14 @@ export function RecipientInput({
           />
         </div>
         {open && list.length > 0 && text.trim() && (
-          <ul className="absolute top-full left-0 z-30 mt-1 w-full max-w-md overflow-hidden rounded-lg border bg-surface shadow-xl animate-fade-in">
+          <ul className="absolute top-full left-0 z-30 mt-1 w-full max-w-md overflow-hidden rounded-lg border bg-surface py-1 shadow-pop animate-pop-in">
             {list.map((s, i) => (
               <li key={s.address}>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => add({ name: s.name, address: s.address })}
-                  className={cn("flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm", i === hi ? "bg-surface-2" : "hover:bg-surface-2")}
+                  className={cn("flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm", i === hi ? "bg-selected" : "hover:bg-surface-2")}
                 >
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white" style={{ background: avatarColor(s.address) }}>
                     {initials(s.name || s.address)}

@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Check, Monitor, Moon, Sun } from "lucide-react";
 import { formatBytes } from "@ionnet/shared";
 import { useChangePassword, useMe, useQuota, useUpdateProfile } from "@/lib/queries";
-import { useTheme, type ThemeSetting } from "@/lib/theme";
+import { ACCENTS, useAccent, useIsDark, useTheme, type AccentName, type ThemeSetting } from "@/lib/theme";
+import { setPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { cn, passwordStrength } from "@/lib/utils";
@@ -24,6 +25,10 @@ export function SettingsPage() {
   const updateProfile = useUpdateProfile();
   const changePw = useChangePassword();
   const [theme, setTheme] = useTheme();
+  const [accent, setAccent] = useAccent();
+  const dark = useIsDark();
+  const prefs = usePrefs();
+  const customAccent = accent.startsWith("#") ? accent : null;
   const [displayName, setDisplayName] = useState(me?.displayName ?? "");
   const [signature, setSignature] = useState(me?.signature ?? "");
   const [current, setCurrent] = useState("");
@@ -117,23 +122,93 @@ export function SettingsPage() {
           </form>
         </Section>
 
-        <Section title="Appearance">
-          <div className="flex gap-2">
-            {themeOptions.map((o) => (
-              <button
-                key={o.v}
-                type="button"
-                onClick={() => setTheme(o.v)}
-                className={cn(
-                  "focus-ring flex flex-1 flex-col items-center gap-1.5 rounded-lg border px-3 py-3 text-xs font-medium transition-colors",
-                  theme === o.v ? "border-accent bg-accent-soft text-accent" : "hover:bg-surface-2",
-                )}
-              >
-                {o.icon}
-                {o.label}
-              </button>
-            ))}
+        <Section title="Appearance" description="Saved on this device.">
+          <div className="flex flex-col gap-5">
+            <div>
+              <div className="mb-2 text-xs font-medium text-fg-muted">Mode</div>
+              <div className="flex gap-2">
+                {themeOptions.map((o) => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    aria-pressed={theme === o.v}
+                    onClick={() => setTheme(o.v)}
+                    className={cn(
+                      "focus-ring flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-xs font-medium transition-colors",
+                      theme === o.v ? "border-accent bg-accent-soft text-accent" : "hover:bg-surface-2",
+                    )}
+                  >
+                    {o.icon}
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-medium text-fg-muted">Color</div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {(Object.keys(ACCENTS) as AccentName[]).map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    aria-label={ACCENTS[name].label}
+                    aria-pressed={accent === name}
+                    title={ACCENTS[name].label}
+                    onClick={() => setAccent(name)}
+                    className={cn(
+                      "focus-ring flex h-8 w-8 items-center justify-center rounded-full text-white ring-offset-2 ring-offset-surface transition-transform hover:scale-110",
+                      accent === name && "ring-2 ring-fg-muted",
+                    )}
+                    style={{ background: ACCENTS[name].colors[dark ? 1 : 0] }}
+                  >
+                    {accent === name && <Check size={15} strokeWidth={3} />}
+                  </button>
+                ))}
+                <span className="mx-1 h-6 w-px bg-border" />
+                <label
+                  title="Custom color"
+                  className={cn(
+                    "focus-ring relative flex h-8 cursor-pointer items-center gap-2 rounded-full border py-1 pr-3 pl-1 text-xs font-medium ring-offset-2 ring-offset-surface transition-colors hover:bg-surface-2",
+                    customAccent && "ring-2 ring-fg-muted",
+                  )}
+                >
+                  <span
+                    className="h-6 w-6 rounded-full border"
+                    style={{ background: customAccent ?? "conic-gradient(#e0558f, #e2733a, #d6b928, #2ea660, #1aa596, #3b82f6, #8b6cf0, #e0558f)" }}
+                  />
+                  Custom
+                  <input
+                    type="color"
+                    value={customAccent ?? ACCENTS.blue.colors[0]}
+                    onChange={(e) => setAccent(e.target.value as `#${string}`)}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label="Custom accent color"
+                  />
+                </label>
+              </div>
+            </div>
           </div>
+        </Section>
+
+        <Section title="Sending">
+          <Field label="Undo send" hint="After you press Send, the message is held back for a moment so you can change your mind. Keep this tab open until it has gone out.">
+            <div className="flex gap-2">
+              {([0, 5, 10, 20] as Array<Prefs["undoSendSeconds"]>).map((sec) => (
+                <button
+                  key={sec}
+                  type="button"
+                  aria-pressed={prefs.undoSendSeconds === sec}
+                  onClick={() => setPrefs({ undoSendSeconds: sec })}
+                  className={cn(
+                    "focus-ring flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                    prefs.undoSendSeconds === sec ? "border-accent bg-accent-soft text-accent" : "hover:bg-surface-2",
+                  )}
+                >
+                  {sec === 0 ? "Off" : `${sec} seconds`}
+                </button>
+              ))}
+            </div>
+          </Field>
         </Section>
 
         <Section title="Storage">

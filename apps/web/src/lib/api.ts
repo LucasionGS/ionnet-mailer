@@ -94,8 +94,33 @@ export const api = {
   },
 };
 
-export function sendMail(payload: SendRequest, files: File[]): Promise<{ ok: true; messageId: string }> {
-  return api.multipart("POST", "/api/mail/send", payload, files);
+/** `onProgress` reports the upload as 0–1; only worth passing when there are attachments. */
+export function sendMail(payload: SendRequest, files: File[], onProgress?: (fraction: number) => void): Promise<{ ok: true; messageId: string }> {
+  if (!onProgress) return api.multipart("POST", "/api/mail/send", payload, files);
+  // fetch can't report upload progress, XMLHttpRequest can
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("payload", JSON.stringify(payload));
+    for (const f of files) fd.append("files", f, f.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/mail/send");
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.onload = () => {
+      let body: unknown;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        body = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { ok: true; messageId: string });
+      const err = (body ?? {}) as Partial<ApiError>;
+      reject(new ApiClientError(xhr.status, { error: err.error ?? "http_error", message: err.message ?? `${xhr.status} ${xhr.statusText}`, details: err.details }));
+    };
+    xhr.send(fd);
+  });
 }
 
 export function saveDraft(payload: DraftRequest, files: File[]): Promise<{ uid: number }> {

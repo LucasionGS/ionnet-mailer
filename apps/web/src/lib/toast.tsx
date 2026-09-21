@@ -9,6 +9,8 @@ export interface ToastItem {
   title: string;
   description?: string;
   action?: { label: string; onClick: () => void };
+  /** show a bar that runs out over this many ms (the caller decides what happens when it does) */
+  countdownMs?: number;
 }
 
 let items: ToastItem[] = [];
@@ -30,6 +32,15 @@ toast.success = (title: string, description?: string) => toast({ kind: "success"
 toast.error = (title: string, description?: string) => toast({ kind: "error", title, description });
 toast.info = (title: string, description?: string, action?: ToastItem["action"]) => toast({ kind: "info", title, description, action });
 
+/** Change a toast that is already showing, e.g. "Sending…" into "Sent". Restarts its timer. */
+export function updateToast(id: number, patch: Partial<Omit<ToastItem, "id">> & { duration?: number }) {
+  const { duration, ...rest } = patch;
+  if (!items.some((t) => t.id === id)) return;
+  items = items.map((t) => (t.id === id ? { ...t, countdownMs: undefined, action: undefined, ...rest } : t));
+  emit();
+  if (duration && duration > 0) setTimeout(() => dismiss(id), duration);
+}
+
 export function dismiss(id: number) {
   items = items.filter((t) => t.id !== id);
   emit();
@@ -48,47 +59,39 @@ export function useToasts() {
 export function Toaster() {
   const list = useToasts();
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-[100] flex w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 left-4 z-[100] flex w-[380px] max-w-[calc(100vw-2rem)] flex-col gap-2 max-md:bottom-16">
       {list.map((t) => (
         <div
           key={t.id}
           role="status"
-          className={cn(
-            "pointer-events-auto animate-fade-in flex items-start gap-3 rounded-lg border bg-surface p-3 shadow-lg",
-            t.kind === "error" && "border-danger/40",
-            t.kind === "success" && "border-success/40",
-          )}
+          className="pointer-events-auto animate-toast-in relative flex items-center gap-3 overflow-hidden rounded-lg bg-fg py-2.5 pr-2 pl-3.5 text-bg shadow-float"
         >
-          <span
-            className={cn(
-              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-              t.kind === "error" ? "bg-danger" : t.kind === "success" ? "bg-success" : "bg-accent",
-            )}
-          />
+          {t.kind !== "info" && <span className={cn("h-2 w-2 shrink-0 rounded-full", t.kind === "error" ? "bg-danger" : "bg-success")} />}
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">{t.title}</div>
-            {t.description && <div className="mt-0.5 text-xs text-fg-muted break-words">{t.description}</div>}
-            {t.action && (
-              <button
-                type="button"
-                className="mt-1.5 text-xs font-medium text-accent hover:underline"
-                onClick={() => {
-                  t.action?.onClick();
-                  dismiss(t.id);
-                }}
-              >
-                {t.action.label}
-              </button>
-            )}
+            <div className="truncate text-sm font-medium">{t.title}</div>
+            {t.description && <div className="mt-0.5 line-clamp-3 text-xs break-words opacity-70">{t.description}</div>}
           </div>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            className="rounded p-1 text-fg-faint hover:bg-surface-2 hover:text-fg"
-            onClick={() => dismiss(t.id)}
-          >
+          {t.action && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md px-2 py-1 text-sm font-semibold text-bg underline-offset-2 hover:bg-bg/10 hover:underline"
+              onClick={() => {
+                t.action?.onClick();
+                dismiss(t.id);
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
+          <button type="button" aria-label="Dismiss" className="shrink-0 rounded-md p-1 opacity-60 hover:bg-bg/10 hover:opacity-100" onClick={() => dismiss(t.id)}>
             <X size={14} />
           </button>
+          {t.countdownMs && (
+            <span
+              className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-bg/50"
+              style={{ animation: `countdown ${t.countdownMs}ms linear forwards` }}
+            />
+          )}
         </div>
       ))}
     </div>

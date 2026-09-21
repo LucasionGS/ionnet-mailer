@@ -30,7 +30,7 @@ function bodyHtml(m: Message): string {
 }
 
 export function quotedBlock(m: Message): string {
-  return `<p></p><p></p><div class="ionnet-quote"><p>${quoteHeader(m)}</p><blockquote>${bodyHtml(m)}</blockquote></div>`;
+  return `<div class="ionnet-quote"><p>${quoteHeader(m)}</p><blockquote>${bodyHtml(m)}</blockquote></div>`;
 }
 
 function forwardHeader(m: Message): string {
@@ -73,6 +73,13 @@ function rePrefix(subject: string, prefix: "Re" | "Fwd"): string {
   return re.test(s) ? s : `${prefix}: ${s}`;
 }
 
+/** Answer from the address the message was sent to, when that is one of ours (e.g. an alias). */
+function receivedAs(m: Message, me: Me): string | null {
+  const mine = new Set((me.sendAs ?? []).map((a) => a.toLowerCase()));
+  const hit = [...m.to, ...m.cc].find((a) => mine.has(a.address.toLowerCase()));
+  return hit && !sameAddress(hit.address, me.email) ? hit.address.toLowerCase() : null;
+}
+
 export function replyInit(m: Message, me: Me, all: boolean): ComposerInit {
   const replyTarget = m.replyTo.length ? m.replyTo : m.from ? [m.from] : [];
   const to = dedupe(replyTarget, [me.email]);
@@ -84,15 +91,18 @@ export function replyInit(m: Message, me: Me, all: boolean): ComposerInit {
     to: finalTo,
     cc,
     subject: rePrefix(m.subject, "Re"),
-    html: quotedBlock(m),
+    html: "",
+    quote: quotedBlock(m),
+    fromAddress: receivedAs(m, me),
     inReplyTo: { folder: m.folder, uid: m.uid },
     replyMode: "reply",
     original: m,
   };
 }
 
-export function forwardInit(m: Message): ComposerInit {
+export function forwardInit(m: Message, me: Me): ComposerInit {
   return {
+    fromAddress: receivedAs(m, me),
     mode: "forward",
     to: [],
     subject: rePrefix(m.subject, "Fwd"),
@@ -106,7 +116,7 @@ export function forwardInit(m: Message): ComposerInit {
   };
 }
 
-export function draftInit(m: Message): ComposerInit {
+export function draftInit(m: Message, me: Me): ComposerInit {
   const body = withoutSignature(m.html ?? (m.text ? textToHtml(m.text) : ""));
   return {
     mode: "draft",
@@ -117,6 +127,7 @@ export function draftInit(m: Message): ComposerInit {
     html: body.html,
     signature: body.signature,
     draftUid: m.uid,
+    fromAddress: m.from && !sameAddress(m.from.address, me.email) && (me.sendAs ?? []).includes(m.from.address.toLowerCase()) ? m.from.address.toLowerCase() : null,
     original: m,
   };
 }

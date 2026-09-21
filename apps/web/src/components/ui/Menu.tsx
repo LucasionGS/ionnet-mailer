@@ -22,7 +22,7 @@ export function Menu({
           align={align}
           side={side}
           sideOffset={6}
-          className="z-[60] min-w-[180px] max-w-[320px] animate-fade-in rounded-lg border bg-surface p-1 shadow-xl outline-none"
+          className="z-[60] min-w-[180px] max-w-[320px] animate-pop-in rounded-lg border bg-surface p-1 shadow-pop outline-none"
         >
           {children}
         </DM.Content>

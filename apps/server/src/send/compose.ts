@@ -66,6 +66,8 @@ export async function buildMime(input: ComposeInput): Promise<{ raw: Buffer; mes
     text,
     html,
     attachments,
+    // images pasted into the editor arrive as data: URLs; send them as inline cid parts, which mail clients actually display
+    attachDataUrls: true,
     messageId,
     date: new Date(),
     inReplyTo: original?.messageId ?? undefined,

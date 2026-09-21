@@ -25,10 +25,10 @@ export function Dialog({
   return (
     <RD.Root open={open} onOpenChange={onOpenChange}>
       <RD.Portal>
-        <RD.Overlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px] data-[state=open]:animate-fade-in" />
+        <RD.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-overlay-in" />
         <RD.Content
           className={cn(
-            "fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-surface shadow-2xl outline-none data-[state=open]:animate-fade-in",
+            "fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-surface shadow-float outline-none data-[state=open]:animate-dialog-in",
             width,
           )}
         >

@@ -9,3 +9,4 @@ export * from "./Tooltip";
 export * from "./Badge";
 export * from "./Spinner";
 export * from "./EmptyState";
+export * from "./Popover";

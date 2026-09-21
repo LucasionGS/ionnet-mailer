@@ -68,9 +68,9 @@ export function MessageCard(p: MessageCardProps) {
   const authBad = [auth.spf, auth.dkim, auth.dmarc].some((v) => v && /^(fail|softfail|permerror)/i.test(v));
 
   return (
-    <article className={cn("rounded-xl border bg-surface transition-shadow", p.expanded && "shadow-sm")}>
+    <article>
       <header
-        className={cn("flex cursor-pointer items-start gap-3 px-4 py-3", !p.expanded && "hover:bg-surface-2")}
+        className={cn("-mx-2 flex cursor-pointer items-start gap-3 rounded-lg px-2 py-3.5 transition-colors", !p.expanded && "hover:bg-surface-2")}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("button,a")) return;
           p.onToggle();
@@ -174,7 +174,7 @@ export function MessageCard(p: MessageCardProps) {
       {p.expanded && (
         <div className="animate-fade-in">
           {m.hasRemoteContent && !showRemote && (
-            <div className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-md border bg-surface-2 px-3 py-1.5 text-xs text-fg-muted">
+            <div className="mb-3 ml-12 flex flex-wrap items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-xs text-fg-muted max-md:ml-0">
               <ImageIcon size={13} />
               Remote images are hidden to protect your privacy.
               <button type="button" className="font-medium text-accent hover:underline" onClick={() => setShowRemote(true)}>
@@ -182,17 +182,17 @@ export function MessageCard(p: MessageCardProps) {
               </button>
             </div>
           )}
-          <div className="px-4 pb-4">
+          <div className="pb-5 md:pl-12">
             {m.html ? (
               <HtmlFrame html={m.html} allowRemote={showRemote} dark={p.dark} />
             ) : m.text ? (
-              <div className="plain-body text-sm">{m.text}</div>
+              <div className="plain-body text-sm leading-relaxed">{m.text}</div>
             ) : (
               <div className="text-sm text-fg-faint italic">This message has no content.</div>
             )}
           </div>
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 border-t px-4 py-3">
+            <div className="flex flex-wrap gap-2 pb-5 md:pl-12">
               <div className="flex w-full items-center gap-1 text-xs text-fg-muted">
                 <Paperclip size={12} />
                 {attachments.length} {attachments.length === 1 ? "attachment" : "attachments"}

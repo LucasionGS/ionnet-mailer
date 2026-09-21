@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type {
   AddressSuggestion,
   Alias,
@@ -23,6 +23,7 @@ import type {
   MailboxUpdate,
   Me,
   Message,
+  MessageRef,
   MoveRequest,
   Ok,
   PasswordChange,
@@ -34,6 +35,7 @@ import type {
   SetupStatus,
   Thread,
   ThreadList,
+  ThreadSummary,
 } from "@ionnet/shared";
 import { api, isApiError } from "./api";
 
@@ -179,26 +181,108 @@ export function invalidateMail(qc: QueryClient, folder?: string) {
     void qc.invalidateQueries({ queryKey: ["mail", "thread"] });
   }
 }
-export function useFlagMessages() {
+type ThreadPages = InfiniteData<ThreadList, string | null>;
+
+/**
+ * Apply a change to every cached conversation list and open conversation right away, so the UI answers
+ * before the server does. `threadFn`/`messageFn` return the updated item, or null to drop it.
+ */
+async function patchMailCache(
+  qc: QueryClient,
+  refs: MessageRef[],
+  threadFn: (t: ThreadSummary, hit: number[]) => ThreadSummary | null,
+  messageFn: (m: Message) => Message | null,
+) {
+  await Promise.all([qc.cancelQueries({ queryKey: ["mail", "threads"] }), qc.cancelQueries({ queryKey: ["mail", "thread"] })]);
+  const byFolder = new Map<string, Set<number>>();
+  for (const r of refs) {
+    if (!byFolder.has(r.folder)) byFolder.set(r.folder, new Set());
+    byFolder.get(r.folder)!.add(r.uid);
+  }
+  qc.setQueriesData<ThreadPages>({ queryKey: ["mail", "threads"] }, (data) => {
+    if (!data) return data;
+    return {
+      ...data,
+      pages: data.pages.map((page) => {
+        let removed = 0;
+        const threads = page.threads.flatMap((t) => {
+          const uids = byFolder.get(t.folder);
+          const hit = uids ? t.uids.filter((u) => uids.has(u)) : [];
+          if (!hit.length) return [t];
+          const next = threadFn(t, hit);
+          if (!next) removed++;
+          return next ? [next] : [];
+        });
+        return removed ? { ...page, threads, total: Math.max(0, page.total - removed) } : { ...page, threads };
+      }),
+    };
+  });
+  qc.setQueriesData<Thread>({ queryKey: ["mail", "thread"] }, (data) => {
+    if (!data) return data;
+    const messages = data.messages.flatMap((m) => {
+      if (!byFolder.get(m.folder)?.has(m.uid)) return [m];
+      const next = messageFn(m);
+      return next ? [next] : [];
+    });
+    return { ...data, messages };
+  });
+}
+
+function useMailMutation<B extends { messages: MessageRef[] }>(
+  path: string,
+  threadFn: (body: B) => (t: ThreadSummary, hit: number[]) => ThreadSummary | null,
+  messageFn: (body: B) => (m: Message) => Message | null,
+) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: FlagRequest) => api.post<Ok>("/api/mail/messages/flags", body),
-    onSuccess: () => invalidateMail(qc),
+    mutationFn: (body: B) => api.post<Ok>(path, body),
+    onMutate: (body) => patchMailCache(qc, body.messages, threadFn(body), messageFn(body)),
+    // Success or failure, the server has the last word.
+    onSettled: () => invalidateMail(qc),
   });
+}
+
+/** A conversation leaves the list once all of its messages are gone; otherwise it just gets shorter. */
+const dropFromThread = (t: ThreadSummary, hit: number[]): ThreadSummary | null => {
+  const uids = t.uids.filter((u) => !hit.includes(u));
+  return uids.length ? { ...t, uids, messageCount: Math.max(1, t.messageCount - hit.length) } : null;
+};
+
+export function useFlagMessages() {
+  return useMailMutation<FlagRequest>(
+    "/api/mail/messages/flags",
+    (body) => (t, hit) => {
+      const whole = hit.length === t.uids.length;
+      const next = { ...t };
+      if (body.add.includes("\\Seen") && whole) next.unread = false;
+      if (body.remove.includes("\\Seen")) next.unread = true;
+      if (body.add.includes("\\Flagged")) next.flagged = true;
+      if (body.remove.includes("\\Flagged") && whole) next.flagged = false;
+      return next;
+    },
+    (body) => (m) => {
+      const next = { ...m };
+      if (body.add.includes("\\Seen")) next.unread = false;
+      if (body.remove.includes("\\Seen")) next.unread = true;
+      if (body.add.includes("\\Flagged")) next.flagged = true;
+      if (body.remove.includes("\\Flagged")) next.flagged = false;
+      return next;
+    },
+  );
 }
 export function useMoveMessages() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: MoveRequest) => api.post<Ok>("/api/mail/messages/move", body),
-    onSuccess: () => invalidateMail(qc),
-  });
+  return useMailMutation<MoveRequest>(
+    "/api/mail/messages/move",
+    () => dropFromThread,
+    () => () => null,
+  );
 }
 export function useDeleteMessages() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: DeleteRequest) => api.post<Ok>("/api/mail/messages/delete", body),
-    onSuccess: () => invalidateMail(qc),
-  });
+  return useMailMutation<DeleteRequest>(
+    "/api/mail/messages/delete",
+    () => dropFromThread,
+    () => () => null,
+  );
 }
 
 // ---- contacts ------------------------------------------------------------
