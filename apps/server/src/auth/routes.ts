@@ -3,7 +3,7 @@ import { LoginRequestSchema, type Me } from "@ionnet/shared";
 import type { AppEnv } from "../http/types.ts";
 import { parseJson } from "../http/validate.ts";
 import { MailboxRow, Domain } from "../db/models.ts";
-import { verifyPassword } from "./password.ts";
+import { hashPassword, needsRehash, verifyPassword } from "./password.ts";
 import { createSession, destroySession } from "./session.ts";
 import { clearFailures, isLocked, recordFailure } from "./ratelimit.ts";
 import { requireAuth } from "../http/middleware.ts";
@@ -44,6 +44,11 @@ authRoutes.post("/login", async (c) => {
   }
 
   await Promise.all([clearFailures("ip", ip), clearFailures("user", email)]);
+  // Imported accounts may carry a legacy hash (e.g. SHA512-CRYPT); upgrade it now that we know the password.
+  if (needsRehash(user.passwordHash)) {
+    user.passwordHash = await hashPassword(password);
+    await user.save();
+  }
   await createSession(c, user.id, ip);
   return c.json(await toMe(user));
 });
