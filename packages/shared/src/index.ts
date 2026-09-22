@@ -41,6 +41,18 @@
  *   GET    /api/admin/status                    -> ServerStatus
  *   GET    /api/admin/lockouts                  -> Lockout[]
  *   DELETE /api/admin/lockouts/:key             -> { ok }
+ *   GET    /api/admin/overview?range=&tz=       -> Overview                  (range 24h|7d|30d, tz = IANA zone for day buckets)
+ *   GET    /api/admin/auth-events?result=&source=&q=&before=   -> Page<AuthEvent>
+ *   GET    /api/admin/auth-events/failed-ips?hours=            -> FailedIp[]
+ *   GET    /api/admin/sessions                  -> WebSession[]
+ *   DELETE /api/admin/sessions/:id              -> { ok }
+ *   GET    /api/admin/mail-log?direction=&status=&q=&before=   -> Page<MailLogEntry>
+ *   GET    /api/admin/queue                     -> QueueSnapshot
+ *   POST   /api/admin/queue/flush               -> { ok }                    (retry every deferred message now)
+ *   POST   /api/admin/queue/:queueId/:action    -> { ok }                    (action: QueueAction)
+ *   GET    /api/admin/spam-history              -> SpamHistory               (rspamd's recent scans)
+ *   GET    /api/admin/logs?source=&level=&q=&limit=&own=       -> LogView   (own=1 keeps the web app's own connections)
+ *   GET    /api/admin/audit?q=&before=          -> Page<AuditEntry>
  *
  *  Mail (per logged-in mailbox)
  *   GET    /api/mail/folders                    -> Folder[]
@@ -69,6 +81,9 @@
  *  Internal (no auth, only reachable from the compose network / Caddy)
  *   GET    /internal/tls-allowed?domain=        200 if domain is mta-sts.<d> or autoconfig.<d> of a registered domain
  *   GET    /healthz                             200
+ *
+ *  Internal port (INTERNAL_PORT, 3001; never proxied by Caddy)
+ *   POST   /dovecot/events/:token               Dovecot event exporter (auth_request_finished) -> 204
  *
  *  Served by Host header for registered domains (not under /api):
  *   GET    /.well-known/mta-sts.txt             (host mta-sts.<domain>)
@@ -331,6 +346,210 @@ export const LockoutSchema = z.object({
   lockedUntil: z.string().nullable(),
 });
 export type Lockout = z.infer<typeof LockoutSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin: activity & monitoring
+// ---------------------------------------------------------------------------
+/** Paged lists return the newest rows first; pass `nextCursor` back as `?before=` for the next page. */
+export function pageSchema<T extends z.ZodType>(item: T) {
+  return z.object({ items: z.array(item), nextCursor: z.string().nullable() });
+}
+export type Page<T> = { items: T[]; nextCursor: string | null };
+
+/** Where a sign-in attempt came from: the web app, or a mail protocol authenticated by Dovecot. */
+export const AuthSourceSchema = z.enum(["web", "imap", "pop3", "smtp", "sieve", "other"]);
+export type AuthSource = z.infer<typeof AuthSourceSchema>;
+
+export const AuthFailureReasonSchema = z.enum(["wrong_password", "unknown_user", "disabled", "locked"]);
+export type AuthFailureReason = z.infer<typeof AuthFailureReasonSchema>;
+
+/** Identical attempts close together are folded into one row; `count` says how many. */
+export const AuthEventSchema = z.object({
+  id: z.string(),
+  source: AuthSourceSchema,
+  username: z.string().nullable(),
+  mailboxId: z.string().nullable(),
+  ip: z.string().nullable(),
+  success: z.boolean(),
+  reason: AuthFailureReasonSchema.nullable(),
+  detail: z.string().nullable(), // e.g. "PLAIN, TLS"
+  userAgent: z.string().nullable(),
+  count: z.number(),
+  firstAt: z.string(),
+  lastAt: z.string(),
+});
+export type AuthEvent = z.infer<typeof AuthEventSchema>;
+
+export const FailedIpSchema = z.object({
+  ip: z.string(),
+  failures: z.number(),
+  usernames: z.array(z.string()), // a few of the names tried
+  sources: z.array(AuthSourceSchema),
+  lastAt: z.string(),
+});
+export type FailedIp = z.infer<typeof FailedIpSchema>;
+
+export const MailDirectionSchema = z.enum(["in", "out"]);
+export type MailDirection = z.infer<typeof MailDirectionSchema>;
+
+/** delivered = stored in a local mailbox, sent = accepted by the remote server, deleted = removed from the queue by an admin. */
+export const MailLogStatusSchema = z.enum(["delivered", "sent", "deferred", "bounced", "expired", "rejected", "deleted"]);
+export type MailLogStatus = z.infer<typeof MailLogStatusSchema>;
+
+/** One recipient of one message as seen by Postfix, or a rejected delivery attempt. */
+export const MailLogEntrySchema = z.object({
+  id: z.string(),
+  queueId: z.string().nullable(),
+  messageId: z.string().nullable(),
+  direction: MailDirectionSchema,
+  status: MailLogStatusSchema,
+  sender: z.string(), // "" for the null sender (bounces)
+  recipient: z.string(),
+  origRecipient: z.string().nullable(), // the address before alias expansion
+  subject: z.string().nullable(),
+  size: z.number().nullable(),
+  clientHost: z.string().nullable(),
+  clientIp: z.string().nullable(),
+  source: z.string().nullable(), // smtp | submission | smtps | app | local
+  saslUser: z.string().nullable(),
+  relay: z.string().nullable(),
+  dsn: z.string().nullable(),
+  detail: z.string().nullable(), // remote server reply or reject reason
+  attempts: z.number(),
+  firstAt: z.string(),
+  lastAt: z.string(),
+});
+export type MailLogEntry = z.infer<typeof MailLogEntrySchema>;
+
+export const QueueMessageSchema = z.object({
+  queueId: z.string(),
+  queue: z.string(), // active | deferred | hold | incoming | maildrop
+  arrivalTime: z.string(),
+  size: z.number(),
+  sender: z.string(),
+  recipients: z.array(z.object({ address: z.string(), reason: z.string().nullable() })),
+});
+export type QueueMessage = z.infer<typeof QueueMessageSchema>;
+
+export const QueueSnapshotSchema = z.object({
+  available: z.boolean(),
+  error: z.string().nullable(),
+  messages: z.array(QueueMessageSchema),
+});
+export type QueueSnapshot = z.infer<typeof QueueSnapshotSchema>;
+
+export const QueueActionSchema = z.enum(["retry", "hold", "release", "delete"]);
+export type QueueAction = z.infer<typeof QueueActionSchema>;
+
+export const SpamScanSchema = z.object({
+  id: z.string(),
+  time: z.string(),
+  ip: z.string().nullable(),
+  from: z.string(),
+  to: z.array(z.string()),
+  subject: z.string(),
+  action: z.string(), // rspamd action: "no action", "add header", "greylist", "reject", ...
+  score: z.number(),
+  requiredScore: z.number(),
+  size: z.number(),
+  user: z.string().nullable(), // authenticated sender, if any
+  symbols: z.array(z.object({ name: z.string(), score: z.number(), description: z.string().nullable(), options: z.array(z.string()) })),
+});
+export type SpamScan = z.infer<typeof SpamScanSchema>;
+
+export const SpamHistorySchema = z.object({ available: z.boolean(), scans: z.array(SpamScanSchema) });
+export type SpamHistory = z.infer<typeof SpamHistorySchema>;
+
+export const LogSourceSchema = z.enum(["postfix", "dovecot", "app"]);
+export type LogSource = z.infer<typeof LogSourceSchema>;
+export const LogLevelSchema = z.enum(["info", "warn", "error"]);
+export type LogLevel = z.infer<typeof LogLevelSchema>;
+
+export const LogViewSchema = z.object({
+  source: LogSourceSchema,
+  available: z.boolean(),
+  note: z.string().nullable(),
+  lines: z.array(z.object({ time: z.string().nullable(), level: LogLevelSchema, text: z.string() })),
+});
+export type LogView = z.infer<typeof LogViewSchema>;
+
+export const WebSessionSchema = z.object({
+  id: z.string(), // an opaque handle, never the session token itself
+  mailboxId: z.string(),
+  email: z.string(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  current: z.boolean(),
+});
+export type WebSession = z.infer<typeof WebSessionSchema>;
+
+export const AuditEntrySchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  actorEmail: z.string().nullable(),
+  ip: z.string().nullable(),
+  action: z.string(), // "mailbox.create", "queue.delete", ...
+  target: z.string().nullable(),
+  detail: z.record(z.string(), z.unknown()).nullable(),
+});
+export type AuditEntry = z.infer<typeof AuditEntrySchema>;
+
+export const OverviewRangeSchema = z.enum(["24h", "7d", "30d"]);
+export type OverviewRange = z.infer<typeof OverviewRangeSchema>;
+
+export const OverviewAlertSchema = z.object({
+  level: z.enum(["danger", "warning", "info"]),
+  title: z.string(),
+  detail: z.string(),
+  /** in-app page that helps, e.g. "/admin/mail?tab=queue" */
+  href: z.string().nullable(),
+});
+export type OverviewAlert = z.infer<typeof OverviewAlertSchema>;
+
+export const OverviewSchema = z.object({
+  generatedAt: z.string(),
+  range: OverviewRangeSchema,
+  /** bucket size of the series: an hour for 24h, a day otherwise */
+  bucket: z.enum(["hour", "day"]),
+  health: z.object({
+    servicesOk: z.number(),
+    servicesTotal: z.number(),
+    down: z.array(z.string()),
+    certDaysLeft: z.number().nullable(),
+    certSelfSigned: z.boolean(),
+  }),
+  host: z.object({
+    diskTotalBytes: z.number().nullable(),
+    diskFreeBytes: z.number().nullable(),
+    memTotalBytes: z.number(),
+    memAvailableBytes: z.number(),
+    load: z.array(z.number()), // 1, 5, 15 minutes
+    cpus: z.number(),
+    uptimeSeconds: z.number(),
+  }),
+  mail: z.object({
+    received: z.number(),
+    sent: z.number(),
+    rejected: z.number(),
+    bounced: z.number(),
+    deferred: z.number(),
+    series: z.array(z.object({ t: z.string(), received: z.number(), sent: z.number(), rejected: z.number(), bounced: z.number() })),
+  }),
+  logins: z.object({
+    failed: z.number(),
+    succeeded: z.number(),
+    series: z.array(z.object({ t: z.string(), failed: z.number(), succeeded: z.number() })),
+    topFailedIps: z.array(FailedIpSchema),
+  }),
+  queue: z.object({ total: z.number(), deferred: z.number(), hold: z.number(), oldest: z.string().nullable() }).nullable(),
+  storage: z.array(z.object({ email: z.string(), usedBytes: z.number(), quotaBytes: z.number() })),
+  counts: z.object({ domains: z.number(), mailboxes: z.number(), aliases: z.number(), sessions: z.number(), lockouts: z.number() }),
+  alerts: z.array(OverviewAlertSchema),
+  recentAudit: z.array(AuditEntrySchema),
+});
+export type Overview = z.infer<typeof OverviewSchema>;
 
 // ---------------------------------------------------------------------------
 // Mail

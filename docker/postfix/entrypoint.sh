@@ -38,4 +38,14 @@ cp -f /etc/resolv.conf /etc/hosts /etc/services /var/spool/postfix/etc/ 2>/dev/n
 
 postfix set-permissions >/dev/null 2>&1 || true
 postfix check
+
+# The mail log lives on the shared mail-logs volume (the app reads it); mirror
+# it to stdout so `docker compose logs postfix` keeps working.
+mkdir -p /var/log/mail
+touch /var/log/mail/postfix.log
+tail -n 0 -F /var/log/mail/postfix.log 2>/dev/null &
+
+# Queue commands from the app, and log rotation.
+/usr/local/bin/postfix-ctl.sh &
+
 exec postfix start-fg

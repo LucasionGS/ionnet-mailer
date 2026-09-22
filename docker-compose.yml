@@ -88,6 +88,7 @@ services:
       - ./docker/dovecot/sieve:/etc/dovecot/sieve:ro
       - vmail:/srv/vmail
       - mail-tls:/certs:ro
+      - mail-logs:/var/log/mail
     networks: [mail]
     depends_on:
       postgres: { condition: service_healthy }
@@ -115,6 +116,8 @@ services:
     volumes:
       - postfix-spool:/var/spool/postfix
       - mail-tls:/certs:ro
+      - mail-logs:/var/log/mail
+      - postfix-ctl:/var/lib/postfix-ctl
     networks: [mail]
     depends_on:
       postgres: { condition: service_healthy }
@@ -169,9 +172,13 @@ services:
       DKIM_DIR: /dkim
       DKIM_GID: "11333"
       TRUST_PROXY: "1"
+      ACTIVITY_RETENTION_DAYS: ${ACTIVITY_RETENTION_DAYS:-90}
       TZ: ${TZ:-UTC}
     volumes:
       - dkim:/dkim
+      # Postfix/Dovecot logs (read-only) and the Postfix queue control channel.
+      - mail-logs:/logs:ro
+      - postfix-ctl:/postfix-ctl
     networks: [mail]
     depends_on:
       postgres: { condition: service_healthy }
@@ -197,6 +204,8 @@ volumes:
   redis-data:
   vmail:
   postfix-spool:
+  mail-logs:
+  postfix-ctl:
   rspamd-data:
   dkim:
   clamav-db:

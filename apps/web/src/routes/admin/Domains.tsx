@@ -1,33 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "@tanstack/react-router";
-import { Activity, ChevronRight, Globe, Plus } from "lucide-react";
+import { ChevronRight, Globe, Plus } from "lucide-react";
 import type { Domain } from "@ionnet/shared";
 import { useCreateDomain, useDomains } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, PageSpinner } from "@/components/ui";
 import { DomainDnsBadge } from "@/features/admin/DomainDnsBadge";
-
-export function AdminHeader({ title, children }: { title: string; children?: React.ReactNode }) {
-  return (
-    <header className="flex items-center gap-3 border-b bg-surface px-5 py-3">
-      <nav className="flex items-center gap-1 text-sm">
-        <Link to="/admin/domains" className="text-fg-muted hover:text-fg [&.active]:font-semibold [&.active]:text-fg">
-          Domains
-        </Link>
-        <span className="mx-2 text-fg-faint">·</span>
-        <Link to="/admin/status" className="text-fg-muted hover:text-fg [&.active]:font-semibold [&.active]:text-fg">
-          <span className="inline-flex items-center gap-1">
-            <Activity size={13} /> Status
-          </span>
-        </Link>
-      </nav>
-      <span className="text-fg-faint">/</span>
-      <h1 className="truncate text-sm font-semibold">{title}</h1>
-      <div className="ml-auto flex items-center gap-2">{children}</div>
-    </header>
-  );
-}
+import { AdminHeader } from "./AdminLayout";
 
 function DomainRow({ d }: { d: Domain }) {
   return (
@@ -75,7 +55,7 @@ export function AdminDomainsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <AdminHeader title="Domains">
+      <AdminHeader title="Domains" description="Domains this server receives mail for, with their mailboxes, aliases and DNS.">
         <Button variant="primary" onClick={() => setAdding(true)}>
           <Plus size={14} /> Add domain
         </Button>

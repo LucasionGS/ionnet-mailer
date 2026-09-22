@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword } from "../auth/password.ts";
 import { destroyOtherSessions } from "../auth/session.ts";
 import { toMe } from "../auth/routes.ts";
 import { unauthorized } from "../errors.ts";
+import { audit } from "../activity/audit.ts";
 
 export const accountRoutes = new Hono<AppEnv>();
 accountRoutes.use("*", requireAuth);
@@ -27,5 +28,6 @@ accountRoutes.post("/password", async (c) => {
   user.passwordHash = await hashPassword(body.newPassword);
   await user.save();
   await destroyOtherSessions(user.id, c.get("sessionId"));
+  await audit(c, "account.password_change", user.email);
   return c.json({ ok: true });
 });

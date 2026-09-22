@@ -16,6 +16,12 @@ import { SettingsPage } from "./routes/Settings";
 import { AdminDomainsPage } from "./routes/admin/Domains";
 import { AdminDomainDetailPage } from "./routes/admin/DomainDetail";
 import { AdminStatusPage } from "./routes/admin/Status";
+import { AdminLayout } from "./routes/admin/AdminLayout";
+import { AdminOverviewPage } from "./routes/admin/Overview";
+import { AdminMailPage, type MailSearch } from "./routes/admin/MailFlow";
+import { AdminSecurityPage, type SecuritySearch } from "./routes/admin/Security";
+import { AdminLogsPage, type LogsSearch } from "./routes/admin/Logs";
+import { AuthSourceSchema, LogLevelSchema, LogSourceSchema, MailDirectionSchema, MailLogStatusSchema, OverviewRangeSchema, type OverviewRange } from "@ionnet/shared";
 import { NotFoundPage } from "./routes/NotFound";
 
 export interface RouterContext {
@@ -97,14 +103,60 @@ const adminRoute = createRoute({
   beforeLoad: ({ context }) => {
     if (!context.me.isAdmin) throw redirect({ to: "/mail/$folder", params: { folder: "INBOX" } });
   },
-  component: () => <Outlet />,
+  component: AdminLayout,
 });
 const adminIndexRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/admin/domains" });
+    throw redirect({ to: "/admin/overview" });
   },
+});
+
+/** Keeps a search param only if it is a non-empty string the schema accepts. */
+function param<T>(schema: { safeParse(v: unknown): { success: boolean; data?: T } }, v: unknown): T | undefined {
+  const r = schema.safeParse(v);
+  return r.success ? r.data : undefined;
+}
+const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+const strip = <T extends object>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+
+const adminOverviewRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "/overview",
+  validateSearch: (s: Record<string, unknown>): { range?: OverviewRange } => strip({ range: param(OverviewRangeSchema, s.range) }),
+  component: AdminOverviewPage,
+});
+const adminMailRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "/mail",
+  validateSearch: (s: Record<string, unknown>): MailSearch =>
+    strip({
+      tab: s.tab === "log" || s.tab === "queue" || s.tab === "spam" ? s.tab : undefined,
+      q: text(s.q),
+      direction: param(MailDirectionSchema, s.direction),
+      status: s.status === "problems" ? ("problems" as const) : param(MailLogStatusSchema, s.status),
+    }),
+  component: AdminMailPage,
+});
+const adminSecurityRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "/security",
+  validateSearch: (s: Record<string, unknown>): SecuritySearch =>
+    strip({
+      tab: s.tab === "signins" || s.tab === "lockouts" || s.tab === "sessions" || s.tab === "audit" ? s.tab : undefined,
+      q: text(s.q),
+      result: s.result === "success" || s.result === "failed" ? s.result : undefined,
+      source: param(AuthSourceSchema, s.source),
+    }),
+  component: AdminSecurityPage,
+});
+const adminLogsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "/logs",
+  validateSearch: (s: Record<string, unknown>): LogsSearch =>
+    strip({ source: param(LogSourceSchema, s.source), level: param(LogLevelSchema, s.level), q: text(s.q) }),
+  component: AdminLogsPage,
 });
 const adminDomainsRoute = createRoute({ getParentRoute: () => adminRoute, path: "/domains", component: AdminDomainsPage });
 const adminDomainDetailRoute = createRoute({
@@ -125,7 +177,16 @@ const routeTree = rootRoute.addChildren([
     mailFolderRoute.addChildren([mailThreadRoute]),
     contactsRoute,
     settingsRoute,
-    adminRoute.addChildren([adminIndexRoute, adminDomainsRoute, adminDomainDetailRoute, adminStatusRoute]),
+    adminRoute.addChildren([
+      adminIndexRoute,
+      adminOverviewRoute,
+      adminDomainsRoute,
+      adminDomainDetailRoute,
+      adminMailRoute,
+      adminSecurityRoute,
+      adminLogsRoute,
+      adminStatusRoute,
+    ]),
   ]),
 ]);
 

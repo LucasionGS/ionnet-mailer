@@ -1,0 +1,2 @@
+# Inbound mail. Logs the Subject for the admin mail log.
+/^Subject:/             INFO

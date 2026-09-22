@@ -1,6 +1,10 @@
 # Ionnet Mailer — Postfix main.cf (values marked "set by entrypoint" come from the environment)
 compatibility_level = 3.10
-maillog_file = /dev/stdout
+# Written to the shared mail-logs volume so the app can build its mail log from it;
+# the entrypoint also copies it to stdout for `docker compose logs postfix`.
+maillog_file = /var/log/mail/postfix.log
+# Long queue ids never repeat, so the app can key its mail log on them.
+enable_long_queue_ids = yes
 queue_directory = /var/spool/postfix
 command_directory = /usr/sbin
 daemon_directory = /usr/lib/postfix/sbin
@@ -61,6 +65,10 @@ smtp_tls_loglevel = 1
 smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
 tls_preempt_cipherlist = no
+
+# ---- Header checks ----------------------------------------------------------
+# Logs each Subject so the admin mail log can show it (cleanup_submission has its own file).
+header_checks = regexp:/etc/postfix/header_checks
 
 # ---- rspamd milter ----------------------------------------------------------
 smtpd_milters = inet:rspamd:11332

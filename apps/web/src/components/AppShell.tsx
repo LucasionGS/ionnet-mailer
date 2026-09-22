@@ -115,7 +115,7 @@ export function AppShell() {
     { to: "/mail/INBOX", match: "/mail", label: "Mail", icon: <Mail size={19} />, badge: inboxUnread },
     { to: "/contacts", match: "/contacts", label: "Contacts", icon: <BookUser size={19} /> },
     { to: "/settings", match: "/settings", label: "Settings", icon: <Settings size={19} /> },
-    ...(me?.isAdmin ? [{ to: "/admin/domains", match: "/admin", label: "Admin", icon: <ShieldCheck size={19} /> }] : []),
+    ...(me?.isAdmin ? [{ to: "/admin/overview", match: "/admin", label: "Admin", icon: <ShieldCheck size={19} /> }] : []),
   ];
 
   const themeOptions: Array<{ v: ThemeSetting; label: string; icon: React.ReactNode }> = [

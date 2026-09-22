@@ -1,6 +1,23 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type {
   AddressSuggestion,
+  AuditEntry,
+  AuthEvent,
+  AuthSource,
+  FailedIp,
+  LogLevel,
+  LogSource,
+  LogView,
+  MailDirection,
+  MailLogEntry,
+  MailLogStatus,
+  Overview,
+  OverviewRange,
+  Page,
+  QueueAction,
+  QueueSnapshot,
+  SpamHistory,
+  WebSession,
   Alias,
   AliasCreate,
   AliasUpdate,
@@ -54,7 +71,33 @@ export const qk = {
   domainDns: (id: string) => ["admin", "domain", id, "dns"] as const,
   status: ["admin", "status"] as const,
   lockouts: ["admin", "lockouts"] as const,
+  overview: (range: OverviewRange) => ["admin", "overview", range] as const,
+  authEvents: (f: AuthEventFilter) => ["admin", "auth-events", f] as const,
+  failedIps: (hours: number) => ["admin", "failed-ips", hours] as const,
+  sessions: ["admin", "sessions"] as const,
+  mailLog: (f: MailLogFilter) => ["admin", "mail-log", f] as const,
+  queue: ["admin", "queue"] as const,
+  spam: ["admin", "spam"] as const,
+  logs: (f: LogFilter) => ["admin", "logs", f] as const,
+  audit: (q: string) => ["admin", "audit", q] as const,
 };
+
+export interface AuthEventFilter {
+  q?: string;
+  result?: "success" | "failed";
+  source?: AuthSource;
+}
+export interface MailLogFilter {
+  q?: string;
+  direction?: MailDirection;
+  status?: MailLogStatus | "problems";
+}
+export interface LogFilter {
+  source: LogSource;
+  level?: LogLevel;
+  q?: string;
+  own?: boolean;
+}
 
 // ---- setup ---------------------------------------------------------------
 export const setupStatusQuery = {
@@ -433,5 +476,96 @@ export function useDeleteLockout() {
   return useMutation({
     mutationFn: (key: string) => api.del<Ok>(`/api/admin/lockouts/${encodeURIComponent(key)}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.lockouts }),
+  });
+}
+
+// ---- admin: monitoring -----------------------------------------------------
+const browserZone = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
+})();
+
+export function useOverview(range: OverviewRange) {
+  return useQuery({
+    queryKey: qk.overview(range),
+    queryFn: () => api.get<Overview>("/api/admin/overview", { range, tz: browserZone }),
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** Newest-first lists paged with `?before=<id>`. */
+function usePaged<T>(key: readonly unknown[], path: string, query: Record<string, string | undefined>, refetchInterval?: number) {
+  return useInfiniteQuery({
+    queryKey: key,
+    queryFn: ({ pageParam }) => api.get<Page<T>>(path, { ...query, limit: 50, before: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    placeholderData: keepPreviousData,
+    refetchInterval,
+  });
+}
+
+export function useAuthEvents(f: AuthEventFilter) {
+  return usePaged<AuthEvent>(qk.authEvents(f), "/api/admin/auth-events", { q: f.q, result: f.result, source: f.source }, 30_000);
+}
+export function useFailedIps(hours = 24) {
+  return useQuery({ queryKey: qk.failedIps(hours), queryFn: () => api.get<FailedIp[]>("/api/admin/auth-events/failed-ips", { hours }), refetchInterval: 60_000 });
+}
+
+export function useWebSessions() {
+  return useQuery({ queryKey: qk.sessions, queryFn: () => api.get<WebSession[]>("/api/admin/sessions") });
+}
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<Ok>(`/api/admin/sessions/${encodeURIComponent(id)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  });
+}
+
+export function useAudit(q: string) {
+  return usePaged<AuditEntry>(qk.audit(q), "/api/admin/audit", { q: q || undefined });
+}
+
+export function useMailLog(f: MailLogFilter) {
+  return usePaged<MailLogEntry>(qk.mailLog(f), "/api/admin/mail-log", { q: f.q, direction: f.direction, status: f.status }, 30_000);
+}
+
+export function useQueue() {
+  return useQuery({ queryKey: qk.queue, queryFn: () => api.get<QueueSnapshot>("/api/admin/queue"), refetchInterval: 15_000 });
+}
+function useQueueMutation<V>(fn: (v: V) => Promise<Ok>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.queue });
+      void qc.invalidateQueries({ queryKey: ["admin", "overview"] });
+    },
+  });
+}
+export function useQueueAction() {
+  return useQueueMutation(({ queueId, action }: { queueId: string; action: QueueAction }) =>
+    api.post<Ok>(`/api/admin/queue/${encodeURIComponent(queueId)}/${action}`),
+  );
+}
+export function useFlushQueue() {
+  return useQueueMutation(() => api.post<Ok>("/api/admin/queue/flush"));
+}
+
+export function useSpamHistory() {
+  return useQuery({ queryKey: qk.spam, queryFn: () => api.get<SpamHistory>("/api/admin/spam-history"), refetchInterval: 30_000 });
+}
+
+export function useLogs(f: LogFilter, live: boolean) {
+  return useQuery({
+    queryKey: qk.logs(f),
+    queryFn: () => api.get<LogView>("/api/admin/logs", { source: f.source, level: f.level, q: f.q, own: f.own ? 1 : undefined, limit: 1000 }),
+    refetchInterval: live ? 5000 : false,
+    placeholderData: keepPreviousData,
   });
 }

@@ -59,6 +59,20 @@ async function rspamdStats(): Promise<ServerStatus["rspamd"]> {
   }
 }
 
+let lastStatus: { at: number; value: Promise<ServerStatus> } | null = null;
+
+/** The overview polls every few seconds; the checks behind it (TLS, DNS, TCP) don't need to run that often. */
+export function cachedServerStatus(maxAgeMs = 30_000): Promise<ServerStatus> {
+  if (!lastStatus || Date.now() - lastStatus.at > maxAgeMs) {
+    const value = serverStatus();
+    lastStatus = { at: Date.now(), value };
+    value.catch(() => {
+      if (lastStatus?.value === value) lastStatus = null;
+    });
+  }
+  return lastStatus.value;
+}
+
 export async function serverStatus(): Promise<ServerStatus> {
   const publicIp = await getPublicIp();
   const ptr = publicIp ? await safe(publicResolver().reverse(publicIp), []) : [];

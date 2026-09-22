@@ -1,10 +1,8 @@
-import { Check, LockKeyhole, RefreshCw, ShieldAlert, X } from "lucide-react";
-import { useDeleteLockout, useLockouts, useServerStatus } from "@/lib/queries";
-import { toast } from "@/lib/toast";
-import { errorMessage } from "@/lib/api";
+import { Check, RefreshCw, ShieldAlert, X } from "lucide-react";
+import { useServerStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Badge, Button, ErrorState, PageSpinner } from "@/components/ui";
-import { AdminHeader } from "./Domains";
+import { AdminHeader } from "./AdminLayout";
 
 function Card({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
@@ -26,12 +24,10 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 export function AdminStatusPage() {
   const { data, isLoading, error, refetch, isFetching } = useServerStatus();
-  const lockouts = useLockouts();
-  const unlock = useDeleteLockout();
 
   return (
     <div className="flex h-full flex-col">
-      <AdminHeader title="Status">
+      <AdminHeader title="System" description="Services, certificate and spam filter of this server.">
         <Button variant="outline" size="sm" onClick={() => refetch()} loading={isFetching}>
           <RefreshCw size={13} /> Refresh
         </Button>
@@ -114,45 +110,6 @@ export function AdminStatusPage() {
                 </>
               ) : (
                 <div className="text-sm text-fg-muted">Statistics unavailable.</div>
-              )}
-            </Card>
-
-            <Card title="Login lockouts" className="md:col-span-2">
-              {lockouts.isLoading ? (
-                <PageSpinner />
-              ) : !lockouts.data?.length ? (
-                <div className="flex items-center gap-2 text-sm text-fg-muted">
-                  <LockKeyhole size={14} /> No IPs or accounts are currently locked out.
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="text-left text-xs text-fg-muted">
-                    <tr>
-                      <th className="py-1 font-medium">Key</th>
-                      <th className="py-1 font-medium">Failed attempts</th>
-                      <th className="py-1 font-medium">Locked until</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {lockouts.data.map((l) => (
-                      <tr key={l.key}>
-                        <td className="py-1.5 font-mono text-xs">{l.key}</td>
-                        <td className="py-1.5">{l.attempts}</td>
-                        <td className="py-1.5 text-xs text-fg-muted">{l.lockedUntil ? new Date(l.lockedUntil).toLocaleString() : "—"}</td>
-                        <td className="py-1.5 text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => unlock.mutate(l.key, { onError: (e) => toast.error("Could not unlock", errorMessage(e)) })}
-                          >
-                            Unlock
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               )}
             </Card>
           </div>

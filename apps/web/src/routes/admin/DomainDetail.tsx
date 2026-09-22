@@ -7,7 +7,7 @@ import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Badge, Button, ConfirmDialog, ErrorState, PageSpinner, Switch } from "@/components/ui";
 import { DnsRecords } from "@/components/DnsRecords";
-import { AdminHeader } from "./Domains";
+import { AdminHeader } from "./AdminLayout";
 import { MailboxesTab } from "@/features/admin/MailboxesTab";
 import { AliasesTab } from "@/features/admin/AliasesTab";
 
@@ -38,7 +38,7 @@ export function AdminDomainDetailPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <AdminHeader title={domain.name}>
+      <AdminHeader title={domain.name} back={{ to: "/admin/domains", label: "Domains" }}>
         {!domain.active && <Badge tone="warning">Disabled</Badge>}
       </AdminHeader>
       <div className="border-b bg-surface px-5">

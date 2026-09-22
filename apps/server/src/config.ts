@@ -26,6 +26,14 @@ const schema = z.object({
   TRUST_PROXY: bool,
   DEV_SEED: bool,
   CLAMAV_ENABLED: bool,
+  // Shared volume where Postfix and Dovecot write their logs (read-only here).
+  LOGS_DIR: z.string().default("/logs"),
+  // Shared volume the Postfix container polls for queue commands (see docker/postfix/postfix-ctl.sh).
+  POSTFIX_CTL_DIR: z.string().default("/postfix-ctl"),
+  // Second listener for Dovecot's event exporter; only reachable inside the compose network.
+  INTERNAL_PORT: z.coerce.number().int().default(3001),
+  // Sign-in attempts, mail log and audit entries older than this are deleted.
+  ACTIVITY_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
 });
 
 const parsed = schema.safeParse(process.env);

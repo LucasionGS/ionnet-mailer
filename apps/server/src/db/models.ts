@@ -174,6 +174,111 @@ DnsCheckRow.init(
   { sequelize, tableName: "dns_checks" },
 );
 
+// BIGSERIAL ids come back from pg as strings; they are only ever used as opaque cursors.
+export class AuthEventRow extends Model<InferAttributes<AuthEventRow>, InferCreationAttributes<AuthEventRow>> {
+  declare id: CreationOptional<string>;
+  declare createdAt: CreationOptional<Date>;
+  declare lastAt: CreationOptional<Date>;
+  declare source: string;
+  declare username: string | null;
+  declare mailboxId: string | null;
+  declare ip: string | null;
+  declare success: boolean;
+  declare reason: string | null;
+  declare detail: string | null;
+  declare userAgent: string | null;
+  declare count: CreationOptional<number>;
+}
+AuthEventRow.init(
+  {
+    id: { type: DataTypes.BIGINT, autoIncrement: true, primaryKey: true },
+    createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    lastAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    source: { type: DataTypes.STRING(16), allowNull: false },
+    username: { type: DataTypes.STRING(254), allowNull: true },
+    mailboxId: { type: DataTypes.UUID, allowNull: true },
+    ip: { type: DataTypes.STRING(64), allowNull: true },
+    success: { type: DataTypes.BOOLEAN, allowNull: false },
+    reason: { type: DataTypes.STRING(32), allowNull: true },
+    detail: { type: DataTypes.STRING(255), allowNull: true },
+    userAgent: { type: DataTypes.STRING(512), allowNull: true },
+    count: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+  },
+  { sequelize, tableName: "auth_events" },
+);
+
+export class MailLogRow extends Model<InferAttributes<MailLogRow>, InferCreationAttributes<MailLogRow>> {
+  declare id: CreationOptional<string>;
+  declare queueId: string | null;
+  declare messageId: string | null;
+  declare direction: string;
+  declare status: string;
+  declare sender: string;
+  declare recipient: string;
+  declare origRecipient: string | null;
+  declare subject: string | null;
+  declare size: number | null;
+  declare clientHost: string | null;
+  declare clientIp: string | null;
+  declare source: string | null;
+  declare saslUser: string | null;
+  declare relay: string | null;
+  declare dsn: string | null;
+  declare detail: string | null;
+  declare attempts: CreationOptional<number>;
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
+}
+MailLogRow.init(
+  {
+    id: { type: DataTypes.BIGINT, autoIncrement: true, primaryKey: true },
+    queueId: { type: DataTypes.STRING(32), allowNull: true },
+    messageId: { type: DataTypes.STRING(512), allowNull: true },
+    direction: { type: DataTypes.STRING(8), allowNull: false },
+    status: { type: DataTypes.STRING(16), allowNull: false },
+    sender: { type: DataTypes.STRING(254), allowNull: false, defaultValue: "" },
+    recipient: { type: DataTypes.STRING(254), allowNull: false },
+    origRecipient: { type: DataTypes.STRING(254), allowNull: true },
+    subject: { type: DataTypes.STRING(500), allowNull: true },
+    size: { type: DataTypes.INTEGER, allowNull: true },
+    clientHost: { type: DataTypes.STRING(255), allowNull: true },
+    clientIp: { type: DataTypes.STRING(64), allowNull: true },
+    source: { type: DataTypes.STRING(16), allowNull: true },
+    saslUser: { type: DataTypes.STRING(254), allowNull: true },
+    relay: { type: DataTypes.STRING(255), allowNull: true },
+    dsn: { type: DataTypes.STRING(16), allowNull: true },
+    detail: { type: DataTypes.TEXT, allowNull: true },
+    attempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
+    createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    updatedAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+  },
+  { sequelize, tableName: "mail_log" },
+);
+
+export class AuditRow extends Model<InferAttributes<AuditRow>, InferCreationAttributes<AuditRow>> {
+  declare id: CreationOptional<string>;
+  declare createdAt: CreationOptional<Date>;
+  declare actorId: string | null;
+  declare actorEmail: string | null;
+  declare ip: string | null;
+  declare action: string;
+  declare target: string | null;
+  declare detail: Record<string, unknown> | null;
+}
+AuditRow.init(
+  {
+    id: { type: DataTypes.BIGINT, autoIncrement: true, primaryKey: true },
+    createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    actorId: { type: DataTypes.UUID, allowNull: true },
+    actorEmail: { type: DataTypes.STRING(254), allowNull: true },
+    ip: { type: DataTypes.STRING(64), allowNull: true },
+    action: { type: DataTypes.STRING(64), allowNull: false },
+    target: { type: DataTypes.STRING(254), allowNull: true },
+    detail: { type: DataTypes.JSONB, allowNull: true },
+  },
+  { sequelize, tableName: "audit_log" },
+);
+
 Domain.hasMany(MailboxRow, { foreignKey: "domainId", as: "mailboxes" });
 MailboxRow.belongsTo(Domain, { foreignKey: "domainId", as: "domain" });
 Domain.hasMany(AliasRow, { foreignKey: "domainId", as: "aliases" });

@@ -27,6 +27,10 @@
   --ring: color-mix(in srgb, var(--accent) 50%, white);
   --elev-pop: 0 1px 2px rgb(16 24 40 / 0.06), 0 8px 24px -4px rgb(16 24 40 / 0.14);
   --elev-float: 0 2px 6px rgb(16 24 40 / 0.08), 0 20px 48px -8px rgb(16 24 40 / 0.22);
+  /* chart series, in this order (validated for colour-vision deficiency against --surface) */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
 }
 
 .dark {
@@ -52,6 +56,9 @@
   --ring: color-mix(in srgb, var(--accent) 75%, black);
   --elev-pop: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -4px rgb(0 0 0 / 0.5);
   --elev-float: 0 2px 6px rgb(0 0 0 / 0.35), 0 20px 48px -8px rgb(0 0 0 / 0.6);
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
 }
 
 @theme inline {
@@ -75,6 +82,9 @@
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-selected: var(--selected);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
   --color-ring: var(--ring);
   --shadow-pop: var(--elev-pop);
   --shadow-float: var(--elev-float);
@@ -97,8 +107,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-* {
-  border-color: var(--border);
+/* In the base layer so border-colour utilities (border-accent, border-danger/30, …) can override it;
+   unlayered, it would beat every utility class. */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 }
 
 ::selection {

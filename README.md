@@ -37,6 +37,22 @@ mailbox, and then shows the DNS records to publish for that domain with live ver
 Afterwards, log in with the admin mailbox. **Admin → Domains** lets you add more domains,
 mailboxes and aliases at any time; each domain has its own DNS guide.
 
+### The admin area
+
+- **Overview**: what needs attention (services down, certificate expiry, DNS problems,
+  stuck mail, password guessing, full mailboxes, low disk), mail traffic and failed
+  sign-ins over 24 hours, 7 or 30 days, and the server's disk, memory and load.
+- **Mail flow**: the mail log (every recipient of every message Postfix accepted, delivered,
+  deferred, bounced or rejected, searchable by address, subject, queue ID or IP), the mail
+  queue with retry, hold and delete, and rspamd's recent spam verdicts with their rules.
+- **Security**: every sign-in attempt (web app, and IMAP, POP3, SMTP and ManageSieve via
+  Dovecot), web lockouts, signed-in web sessions you can sign out, and an audit log of
+  changes made in the admin area.
+- **Server logs**: live Postfix, Dovecot and app logs with level and text filters.
+
+Sign-in attempts and the mail log are kept for `ACTIVITY_RETENTION_DAYS` (90 by default).
+Postfix logs each message's Subject so the mail log can show it.
+
 ### Optional antivirus
 
 ClamAV needs roughly 3–4 GB of RAM. Enable it with:
@@ -99,6 +115,11 @@ packages/shared          zod schemas shared by server and web
   reloads Dovecot on renewal.
 - Login attempts are rate limited in the app (web), Postfix (`anvil`) and Dovecot
   (auth penalty).
+- Postfix and Dovecot write their logs to the `mail-logs` volume (and still to
+  `docker compose logs`); the app reads them from there. Dovecot posts every sign-in
+  result to the app's internal port 3001, which is never published. Queue actions from
+  the admin area reach Postfix through files in the `postfix-ctl` volume, so the app
+  needs neither a network port on Postfix nor the Docker socket.
 
 ## Backups
 

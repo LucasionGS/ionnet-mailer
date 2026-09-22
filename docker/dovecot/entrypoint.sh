@@ -10,11 +10,16 @@ set -eu
 mkdir -p /run/dovecot /srv/vmail
 chown vmail:vmail /srv/vmail
 
+# The app accepts sign-in events only on a URL carrying this token; it derives
+# the same value from the master password (apps/server/src/activity/dovecot-events.ts).
+EVENTS_TOKEN=$(printf '%s' "dovecot-events:$DOVECOT_MASTER_PASSWORD" | sha256sum | cut -c1-40)
+
 # Render the configuration template (secrets come from the environment).
 rm -rf /etc/dovecot/conf.d
 sed -e "s|@@MAIL_NETWORK_SUBNET@@|$MAIL_NETWORK_SUBNET|g" \
     -e "s|@@POSTGRES_DB@@|$POSTGRES_DB|g" \
     -e "s|@@MAIL_DB_PASSWORD@@|$MAIL_DB_PASSWORD|g" \
+    -e "s|@@EVENTS_TOKEN@@|$EVENTS_TOKEN|g" \
     /etc/dovecot/dovecot.conf.template > /etc/dovecot/dovecot.conf
 chmod 0600 /etc/dovecot/dovecot.conf
 
@@ -46,7 +51,14 @@ chown -R vmail:vmail /var/lib/dovecot/sieve
 
 doveconf -n > /dev/null   # fail fast on config errors
 
-# Reload Dovecot whenever tls-sync installs a renewed certificate.
+# The log lives on the shared mail-logs volume; mirror it to stdout.
+LOG_FILE=/var/log/mail/dovecot.log
+MAX_LOG_BYTES=${DOVECOT_LOG_MAX_BYTES:-52428800}
+mkdir -p /var/log/mail
+touch "$LOG_FILE"
+tail -n 0 -F "$LOG_FILE" 2>/dev/null &
+
+# Reload Dovecot whenever tls-sync installs a renewed certificate, and rotate the log.
 (
   last=$(stat -c %Y /certs/tls.crt)
   while sleep 60; do
@@ -55,6 +67,11 @@ doveconf -n > /dev/null   # fail fast on config errors
       last=$now
       echo "dovecot: certificate changed, reloading"
       doveadm reload || true
+    fi
+    size=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+    if [ "$size" -gt "$MAX_LOG_BYTES" ]; then
+      mv -f "$LOG_FILE" "$LOG_FILE.1"
+      doveadm log reopen || true
     fi
   done
 ) &
