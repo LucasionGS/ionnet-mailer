@@ -8,7 +8,8 @@ import { sequelize } from "../db/sequelize.ts";
 import { AliasRow, AuditRow, DnsCheckRow, Domain, MailboxRow, Session } from "../db/models.ts";
 import { cachedServerStatus } from "../status/status.ts";
 import { listLockouts } from "../auth/ratelimit.ts";
-import { getMailboxUsage } from "../mail/usage.ts";
+import { getMailboxUsages } from "../mail/usage.ts";
+import { quotaUsageAll } from "../mail/doveadm.ts";
 import { failedIps } from "../activity/auth-events.ts";
 import { toAuditDto } from "../activity/audit.ts";
 import { queueSnapshot } from "../activity/postfix-ctl.ts";
@@ -132,18 +133,17 @@ let usageRefresh: Promise<Usage[]> | null = null;
 const USAGE_TTL_MS = 10 * 60_000;
 
 async function computeUsage(): Promise<Usage[]> {
-  const mailboxes = await MailboxRow.findAll({ where: { active: true }, order: [["email", "ASC"]], limit: 500 });
-  const out: Usage[] = [];
-  const queue = [...mailboxes];
-  await Promise.all(
-    Array.from({ length: 4 }, async () => {
-      for (let m = queue.shift(); m; m = queue.shift()) {
-        const used = await getMailboxUsage(m).catch(() => null);
-        if (used !== null) out.push({ email: m.email, usedBytes: used, quotaBytes: Number(m.quotaBytes), domainId: m.domainId });
-      }
-    }),
-  );
-  return out.sort((a, b) => b.usedBytes - a.usedBytes);
+  const mailboxes = await MailboxRow.findAll({ where: { active: true }, order: [["email", "ASC"]] });
+  // One doveadm call for every mailbox; per-mailbox lookups (IMAP fallback) if that fails.
+  const used = await quotaUsageAll()
+    .then((all) => new Map(mailboxes.map((m) => [m.id, all.get(m.email)?.usedBytes ?? null])))
+    .catch(() => getMailboxUsages(mailboxes.slice(0, 200)));
+  return mailboxes
+    .flatMap((m) => {
+      const u = used.get(m.id);
+      return u == null ? [] : [{ email: m.email, usedBytes: u, quotaBytes: Number(m.quotaBytes), domainId: m.domainId }];
+    })
+    .sort((a, b) => b.usedBytes - a.usedBytes);
 }
 
 async function mailboxUsage(): Promise<Usage[]> {

@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import type { DomainDetail, Mailbox, MailboxCreate, MailboxUpdate } from "@ionnet/shared";
 import { formatBytes } from "@ionnet/shared";
-import { useCreateMailbox, useDeleteMailbox, useMe, useUpdateMailbox } from "@/lib/queries";
+import { useCreateMailbox, useDeleteMailbox, useMe, useRecalculateQuota, useUpdateMailbox } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { avatarColor, cn, initials } from "@/lib/utils";
@@ -109,6 +109,13 @@ export function MailboxesTab({ domain }: { domain: DomainDetail }) {
   const [deleting, setDeleting] = useState<Mailbox | null>(null);
   const update = useUpdateMailbox(domain.id);
   const del = useDeleteMailbox(domain.id);
+  const recalc = useRecalculateQuota(domain.id);
+
+  const recalculate = (m: Mailbox) =>
+    recalc.mutate(m.id, {
+      onSuccess: (r) => toast.success(`Storage recalculated for ${m.email}`, r.usedBytes != null ? `${formatBytes(r.usedBytes)} in use` : undefined),
+      onError: (e) => toast.error("Could not recalculate storage", errorMessage(e)),
+    });
 
   const toggleActive = (m: Mailbox) =>
     update.mutate(
@@ -178,6 +185,9 @@ export function MailboxesTab({ domain }: { domain: DomainDetail }) {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        <IconButton label="Recalculate storage" size="sm" disabled={recalc.isPending} onClick={() => recalculate(m)}>
+                          <RefreshCw size={14} className={cn(recalc.isPending && recalc.variables === m.id && "animate-[spin_0.8s_linear_infinite]")} />
+                        </IconButton>
                         <IconButton label="Edit / reset password" size="sm" onClick={() => setEditing(m)}>
                           <Pencil size={14} />
                         </IconButton>

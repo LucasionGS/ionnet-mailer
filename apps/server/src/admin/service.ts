@@ -5,7 +5,7 @@ import { AliasRow, Domain, MailboxRow } from "../db/models.ts";
 import { hashPassword } from "../auth/password.ts";
 import { generateDkimKeyPair, materializeDomainKey, removeDomainKey, syncSelectorMap } from "./dkim.ts";
 import { conflict, badRequest, notFound } from "../errors.ts";
-import { getMailboxUsage } from "../mail/usage.ts";
+import { getMailboxUsage, getMailboxUsages } from "../mail/usage.ts";
 
 export async function toDomainDto(d: Domain): Promise<DomainDto> {
   const [mailboxCount, aliasCount, catchAll] = await Promise.all([
@@ -26,7 +26,7 @@ export async function toDomainDto(d: Domain): Promise<DomainDto> {
   };
 }
 
-export async function toMailboxDto(m: MailboxRow, withUsage = false): Promise<Mailbox> {
+function mailboxDto(m: MailboxRow, usedBytes: number | null): Mailbox {
   return {
     id: m.id,
     domainId: m.domainId,
@@ -34,11 +34,21 @@ export async function toMailboxDto(m: MailboxRow, withUsage = false): Promise<Ma
     email: m.email,
     displayName: m.displayName,
     quotaBytes: Number(m.quotaBytes),
-    usedBytes: withUsage ? await getMailboxUsage(m).catch(() => null) : null,
+    usedBytes,
     isAdmin: m.isAdmin,
     active: m.active,
     createdAt: m.createdAt.toISOString(),
   };
+}
+
+export async function toMailboxDto(m: MailboxRow, withUsage = false): Promise<Mailbox> {
+  return mailboxDto(m, withUsage ? await getMailboxUsage(m).catch(() => null) : null);
+}
+
+/** Several mailboxes with their storage use, looked up together. */
+export async function toMailboxDtos(rows: MailboxRow[]): Promise<Mailbox[]> {
+  const usage = await getMailboxUsages(rows).catch(() => new Map<string, number | null>());
+  return rows.map((m) => mailboxDto(m, usage.get(m.id) ?? null));
 }
 
 export function toAliasDto(a: AliasRow): Alias {
@@ -60,7 +70,7 @@ export async function toDomainDetail(d: Domain): Promise<DomainDetail> {
   ]);
   return {
     ...base,
-    mailboxes: await Promise.all(mailboxes.map((m) => toMailboxDto(m, true))),
+    mailboxes: await toMailboxDtos(mailboxes),
     aliases: aliases.map(toAliasDto),
   };
 }

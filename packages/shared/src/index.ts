@@ -34,6 +34,7 @@
  *   POST   /api/admin/domains/:id/mailboxes     MailboxCreate -> Mailbox
  *   PATCH  /api/admin/mailboxes/:id             MailboxUpdate -> Mailbox
  *   DELETE /api/admin/mailboxes/:id             -> { ok }
+ *   POST   /api/admin/mailboxes/:id/recalculate-quota        -> Mailbox   (recounts stored size via doveadm)
  *   GET    /api/admin/domains/:id/aliases       -> Alias[]
  *   POST   /api/admin/domains/:id/aliases       AliasCreate -> Alias
  *   PATCH  /api/admin/aliases/:id               AliasUpdate -> Alias

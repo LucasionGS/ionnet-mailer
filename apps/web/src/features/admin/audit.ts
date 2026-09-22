@@ -44,6 +44,8 @@ export function describeAudit(a: AuditEntry): string {
       if (keys.length === 1 && typeof d.quotaBytes === "number") return `Set the quota of ${t} to ${d.quotaBytes ? formatBytes(d.quotaBytes) : "unlimited"}`;
       return `Changed mailbox ${t}${changed(d)}`;
     }
+    case "mailbox.quota_recalc":
+      return `Recalculated the storage used by ${t}${typeof d.usedBytes === "number" ? ` (${formatBytes(d.usedBytes)})` : ""}`;
     case "alias.create":
       return `Added alias ${t} → ${String(d.destination ?? "")}`;
     case "alias.update":

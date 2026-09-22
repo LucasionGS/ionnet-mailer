@@ -19,6 +19,8 @@ const schema = z.object({
   SMTP_PORT: z.coerce.number().int().default(10025),
   DOVECOT_MASTER_USER: z.string().default("ionnet"),
   DOVECOT_MASTER_PASSWORD: z.string().min(1),
+  // Dovecot's doveadm HTTP API (quota usage and recalculation); internal network only.
+  DOVEADM_URL: z.string().default("http://dovecot:8080"),
   RSPAMD_URL: z.string().default("http://rspamd:11334"),
   RSPAMD_PASSWORD: z.string().optional(),
   DKIM_DIR: z.string().default("/dkim"),

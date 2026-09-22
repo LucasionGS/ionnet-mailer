@@ -20,7 +20,7 @@ import { listThreads, rootFromThreadId, threadUids } from "./threads.ts";
 import { fetchRaw, invalidate, loadMessage, loadMessages } from "./message.ts";
 import { mailEvents } from "./events.ts";
 import { sendRoutes } from "../send/routes.ts";
-import { quotaBytes } from "./usage.ts";
+import { getMailboxUsage } from "./usage.ts";
 
 export const mailRoutes = new Hono<AppEnv>();
 mailRoutes.use("*", requireAuth);
@@ -179,8 +179,9 @@ mailRoutes.post("/messages/delete", async (c) => {
 });
 
 mailRoutes.get("/quota", async (c) => {
-  const q = await pool.withClient(c.get("user"), (client) => client.getQuota("INBOX"));
-  const quota: Quota = { usedBytes: q && q.storage ? quotaBytes(q.storage) : 0, limitBytes: q && q.storage ? q.storage.limit : 0 };
+  const user = c.get("user");
+  // The limit comes from the database: an open IMAP session keeps the limit it logged in with.
+  const quota: Quota = { usedBytes: (await getMailboxUsage(user)) ?? 0, limitBytes: Number(user.quotaBytes) };
   return c.json(quota);
 });
 

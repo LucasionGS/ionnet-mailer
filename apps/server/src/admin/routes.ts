@@ -35,8 +35,11 @@ import {
   toDomainDetail,
   toDomainDto,
   toMailboxDto,
+  toMailboxDtos,
   updateMailbox,
 } from "./service.ts";
+import { pool } from "../mail/pool.ts";
+import { quotaRecalc } from "../mail/doveadm.ts";
 import { serverStatus } from "../status/status.ts";
 import { audit, listAudit } from "../activity/audit.ts";
 import { failedIps, listAuthEvents } from "../activity/auth-events.ts";
@@ -102,7 +105,7 @@ adminRoutes.get("/domains/:id/dns", async (c) => {
 adminRoutes.get("/domains/:id/mailboxes", async (c) => {
   const domain = await requireDomain(c.req.param("id"));
   const rows = await MailboxRow.findAll({ where: { domainId: domain.id }, order: [["email", "ASC"]] });
-  return c.json(await Promise.all(rows.map((m) => toMailboxDto(m, true))));
+  return c.json(await toMailboxDtos(rows));
 });
 
 adminRoutes.post("/domains/:id/mailboxes", async (c) => {
@@ -123,9 +126,21 @@ adminRoutes.patch("/mailboxes/:id", async (c) => {
   const m = await requireMailbox(c.req.param("id"));
   const body = await parseJson(c, MailboxUpdateSchema);
   await updateMailbox(m, body);
+  // Dovecot reads the quota limit when a session logs in; drop the web app's pooled
+  // session so it reconnects with the new limit instead of keeping the old one.
+  if (body.quotaBytes !== undefined) await pool.evict(m.id);
   const { password, ...changes } = body;
   await audit(c, "mailbox.update", m.email, password !== undefined ? { ...changes, password: "changed" } : changes);
-  return c.json(await toMailboxDto(m));
+  return c.json(await toMailboxDto(m, true));
+});
+
+adminRoutes.post("/mailboxes/:id/recalculate-quota", async (c) => {
+  const m = await requireMailbox(c.req.param("id"));
+  await quotaRecalc(m.email);
+  await pool.evict(m.id);
+  const dto = await toMailboxDto(m, true);
+  await audit(c, "mailbox.quota_recalc", m.email, { usedBytes: dto.usedBytes });
+  return c.json(dto);
 });
 
 adminRoutes.delete("/mailboxes/:id", async (c) => {

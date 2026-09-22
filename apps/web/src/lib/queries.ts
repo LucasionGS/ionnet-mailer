@@ -425,7 +425,20 @@ export function useUpdateMailbox(domainId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: MailboxUpdate }) => api.patch<Mailbox>(`/api/admin/mailboxes/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.domain(domainId) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.quota });
+    },
+  });
+}
+export function useRecalculateQuota(domainId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Mailbox>(`/api/admin/mailboxes/${id}/recalculate-quota`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.quota });
+    },
   });
 }
 export function useDeleteMailbox(domainId: string) {

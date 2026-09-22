@@ -13,6 +13,8 @@ chown vmail:vmail /srv/vmail
 # The app accepts sign-in events only on a URL carrying this token; it derives
 # the same value from the master password (apps/server/src/activity/dovecot-events.ts).
 EVENTS_TOKEN=$(printf '%s' "dovecot-events:$DOVECOT_MASTER_PASSWORD" | sha256sum | cut -c1-40)
+# Same idea for the doveadm HTTP API (apps/server/src/mail/doveadm.ts).
+DOVEADM_PASSWORD=$(printf '%s' "doveadm:$DOVECOT_MASTER_PASSWORD" | sha256sum | cut -c1-40)
 
 # Render the configuration template (secrets come from the environment).
 rm -rf /etc/dovecot/conf.d
@@ -20,6 +22,7 @@ sed -e "s|@@MAIL_NETWORK_SUBNET@@|$MAIL_NETWORK_SUBNET|g" \
     -e "s|@@POSTGRES_DB@@|$POSTGRES_DB|g" \
     -e "s|@@MAIL_DB_PASSWORD@@|$MAIL_DB_PASSWORD|g" \
     -e "s|@@EVENTS_TOKEN@@|$EVENTS_TOKEN|g" \
+    -e "s|@@DOVEADM_PASSWORD@@|$DOVEADM_PASSWORD|g" \
     /etc/dovecot/dovecot.conf.template > /etc/dovecot/dovecot.conf
 chmod 0600 /etc/dovecot/dovecot.conf
 
