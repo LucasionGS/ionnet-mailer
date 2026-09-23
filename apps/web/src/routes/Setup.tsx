@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowRight, Check, CircleAlert, Globe, KeyRound, Mail, PartyPopper, Server, TriangleAlert, UserRound } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, Globe, KeyRound, ListChecks, Mail, PartyPopper, Server, TriangleAlert, UserRound } from "lucide-react";
 import type { DnsCheckResult, SetupHostnameCheckResult } from "@ionnet/shared";
 import { APP_NAME } from "@ionnet/shared";
 import { setupApi, useSetupStatus, qk } from "@/lib/queries";
@@ -9,9 +9,10 @@ import { errorMessage } from "@/lib/api";
 import { cn, passwordStrength } from "@/lib/utils";
 import { Button, Field, Input, Spinner } from "@/components/ui";
 import { DnsRecords } from "@/components/DnsRecords";
+import { SetupStepList } from "@/features/admin/SetupSteps";
 
-type Step = 0 | 1 | 2 | 3 | 4;
-const STEPS = ["Welcome", "Hostname", "Domain & admin", "DNS records", "Done"];
+type Step = 0 | 1 | 2 | 3 | 4 | 5;
+const STEPS = ["Welcome", "Hostname", "Domain & admin", "Setup steps", "DNS records", "Done"];
 
 function StepIndicator({ step }: { step: Step }) {
   return (
@@ -130,6 +131,7 @@ export function SetupPage() {
       });
       setDomainId(r.domainId);
       setStep(3);
+      // Load the DNS check now so it is ready once the setup steps are done.
       setDnsBusy(true);
       try {
         setDns(await setupApi.dns(token.trim(), r.domainId));
@@ -160,7 +162,7 @@ export function SetupPage() {
     try {
       await setupApi.finish(token.trim());
       await qc.invalidateQueries({ queryKey: qk.setupStatus });
-      setStep(4);
+      setStep(5);
     } catch (err) {
       setCreateError(errorMessage(err));
     } finally {
@@ -351,6 +353,26 @@ export function SetupPage() {
           {step === 3 && (
             <div className="flex flex-col gap-5">
               <div>
+                <h2 className="flex items-center gap-2 text-base font-semibold">
+                  <ListChecks size={18} className="text-accent" /> Setup steps
+                </h2>
+                <p className="mt-2 text-sm text-fg-muted">
+                  A few addresses and settings every mail server should have. You can also do these later under Admin → Setup steps,
+                  which shows a badge while any are left.
+                </p>
+              </div>
+              <SetupStepList forwardTo={`${localPart.trim().toLowerCase()}@${domain.trim().toLowerCase()}`} />
+              <div className="flex justify-end">
+                <Button variant="primary" onClick={() => setStep(4)}>
+                  Continue <ArrowRight size={14} />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="flex flex-col gap-5">
+              <div>
                 <h2 className="text-base font-semibold">DNS records for {domain}</h2>
                 <p className="mt-2 text-sm text-fg-muted">
                   Log in to the DNS provider for <b>{domain}</b> (where you bought the domain, or wherever its nameservers are)
@@ -377,7 +399,7 @@ export function SetupPage() {
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="flex flex-col items-center gap-4 py-6 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-success">
                 <PartyPopper size={26} />

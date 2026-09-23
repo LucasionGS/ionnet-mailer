@@ -10,6 +10,9 @@ export type RecordSpec = Omit<DnsRecord, "status" | "found"> & {
 
 const TTL = 3600;
 
+/** Where the DMARC and TLS-RPT records ask receivers to send reports; the "report-addresses" setup step creates them. */
+export const REPORT_LOCAL_PARTS = { dmarc: "dmarc", tlsrpt: "tlsrpt" } as const;
+
 export function splitTxt(value: string, size = 255): string {
   const parts: string[] = [];
   for (let i = 0; i < value.length; i += size) parts.push(`"${value.slice(i, i + size)}"`);
@@ -86,7 +89,7 @@ export function buildRecordSpecs(domain: Domain, hostname: string, publicIp: str
       description: "Tells receivers what to do with mail that fails SPF/DKIM and where to send reports. Start with p=none, move to p=quarantine once everything passes.",
       type: "TXT",
       name: `_dmarc.${d}`,
-      value: `v=DMARC1; p=none; rua=mailto:dmarc@${d}; adkim=s; aspf=s`,
+      value: `v=DMARC1; p=none; rua=mailto:${REPORT_LOCAL_PARTS.dmarc}@${d}; adkim=s; aspf=s`,
       ttl: TTL,
       expect: "v=DMARC1;",
       match: "contains",
@@ -145,7 +148,7 @@ export function buildRecordSpecs(domain: Domain, hostname: string, publicIp: str
       description: "Receive reports about TLS delivery problems.",
       type: "TXT",
       name: `_smtp._tls.${d}`,
-      value: `v=TLSRPTv1; rua=mailto:tlsrpt@${d}`,
+      value: `v=TLSRPTv1; rua=mailto:${REPORT_LOCAL_PARTS.tlsrpt}@${d}`,
       ttl: TTL,
       expect: "v=TLSRPTv1;",
       match: "contains",

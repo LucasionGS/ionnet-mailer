@@ -12,6 +12,7 @@ import { Tooltip } from "./ui/Tooltip";
 import { Composer } from "@/features/mail/Composer";
 import { useComposer } from "@/features/mail/composerStore";
 import { useMailEvents } from "@/features/mail/useMailEvents";
+import { usePendingSetupSteps } from "@/features/admin/SetupSteps";
 import { APP_NAME } from "@ionnet/shared";
 
 interface NavItem {
@@ -20,6 +21,8 @@ interface NavItem {
   label: string;
   icon: React.ReactNode;
   badge?: number;
+  /** show the badge dot in the warning colour: something needs an admin, not unread mail */
+  alert?: boolean;
 }
 
 function RailLink({ item, active }: { item: NavItem; active: boolean }) {
@@ -36,7 +39,7 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
       >
         {active && <span className="absolute top-2 bottom-2 -left-2 w-[3px] rounded-r bg-accent" />}
         {item.icon}
-        {item.badge ? <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-accent ring-2 ring-bg" /> : null}
+        {item.badge ? <span className={cn("absolute top-1.5 right-1.5 h-2 w-2 rounded-full ring-2 ring-bg", item.alert ? "bg-warning" : "bg-accent")} /> : null}
       </Link>
     </Tooltip>
   );
@@ -104,6 +107,7 @@ export function AppShell() {
   const { data: folders } = useFolders();
   const inboxUnread = folders?.find((f) => f.specialUse === "inbox")?.unread ?? 0;
   const onMail = pathname.startsWith("/mail");
+  const pendingSteps = usePendingSetupSteps(!!me?.isAdmin);
 
   useMailEvents();
 
@@ -115,7 +119,7 @@ export function AppShell() {
     { to: "/mail/INBOX", match: "/mail", label: "Mail", icon: <Mail size={19} />, badge: inboxUnread },
     { to: "/contacts", match: "/contacts", label: "Contacts", icon: <BookUser size={19} /> },
     { to: "/settings", match: "/settings", label: "Settings", icon: <Settings size={19} /> },
-    ...(me?.isAdmin ? [{ to: "/admin/overview", match: "/admin", label: "Admin", icon: <ShieldCheck size={19} /> }] : []),
+    ...(me?.isAdmin ? [{ to: "/admin/overview", match: "/admin", label: "Admin", icon: <ShieldCheck size={19} />, badge: pendingSteps, alert: true }] : []),
   ];
 
   const themeOptions: Array<{ v: ThemeSetting; label: string; icon: React.ReactNode }> = [
@@ -223,7 +227,7 @@ export function AppShell() {
             <Link key={item.to} to={item.to} className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium", active ? "text-accent" : "text-fg-muted")}>
               <span className="relative">
                 {item.icon}
-                {item.badge ? <span className="absolute -top-0.5 -right-1 h-2 w-2 rounded-full bg-accent ring-2 ring-surface" /> : null}
+                {item.badge ? <span className={cn("absolute -top-0.5 -right-1 h-2 w-2 rounded-full ring-2 ring-surface", item.alert ? "bg-warning" : "bg-accent")} /> : null}
               </span>
               {item.label}
             </Link>

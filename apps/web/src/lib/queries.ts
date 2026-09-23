@@ -8,7 +8,7 @@ import type {
   LogLevel,
   LogSource,
   LogView,
-  MailDirection,
+  MailDirectionFilter,
   MailLogEntry,
   MailLogStatus,
   Overview,
@@ -16,6 +16,9 @@ import type {
   Page,
   QueueAction,
   QueueSnapshot,
+  ReportAddressesApply,
+  SetupStep,
+  SetupStepKey,
   SpamHistory,
   WebSession,
   Alias,
@@ -69,6 +72,7 @@ export const qk = {
   domains: ["admin", "domains"] as const,
   domain: (id: string) => ["admin", "domain", id] as const,
   domainDns: (id: string) => ["admin", "domain", id, "dns"] as const,
+  setupSteps: ["admin", "setup-steps"] as const,
   status: ["admin", "status"] as const,
   lockouts: ["admin", "lockouts"] as const,
   overview: (range: OverviewRange) => ["admin", "overview", range] as const,
@@ -89,7 +93,7 @@ export interface AuthEventFilter {
 }
 export interface MailLogFilter {
   q?: string;
-  direction?: MailDirection;
+  direction?: MailDirectionFilter;
   status?: MailLogStatus | "problems";
 }
 export interface LogFilter {
@@ -391,7 +395,10 @@ export function useCreateDomain() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: DomainCreate) => api.post<Domain>("/api/admin/domains", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.domains }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.domains });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
+    },
   });
 }
 export function useUpdateDomain(id: string) {
@@ -401,6 +408,7 @@ export function useUpdateDomain(id: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.domains });
       void qc.invalidateQueries({ queryKey: qk.domain(id) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
     },
   });
 }
@@ -417,6 +425,7 @@ export function useCreateMailbox(domainId: string) {
     mutationFn: (body: MailboxCreate) => api.post<Mailbox>(`/api/admin/domains/${domainId}/mailboxes`, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
       void qc.invalidateQueries({ queryKey: qk.domains });
     },
   });
@@ -427,6 +436,7 @@ export function useUpdateMailbox(domainId: string) {
     mutationFn: ({ id, body }: { id: string; body: MailboxUpdate }) => api.patch<Mailbox>(`/api/admin/mailboxes/${id}`, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
       void qc.invalidateQueries({ queryKey: qk.quota });
     },
   });
@@ -447,6 +457,7 @@ export function useDeleteMailbox(domainId: string) {
     mutationFn: (id: string) => api.del<Ok>(`/api/admin/mailboxes/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
       void qc.invalidateQueries({ queryKey: qk.domains });
     },
   });
@@ -457,6 +468,7 @@ export function useCreateAlias(domainId: string) {
     mutationFn: (body: AliasCreate) => api.post<Alias>(`/api/admin/domains/${domainId}/aliases`, body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
       void qc.invalidateQueries({ queryKey: qk.domains });
     },
   });
@@ -465,7 +477,10 @@ export function useUpdateAlias(domainId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: AliasUpdate }) => api.patch<Alias>(`/api/admin/aliases/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.domain(domainId) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
+    },
   });
 }
 export function useDeleteAlias(domainId: string) {
@@ -474,9 +489,30 @@ export function useDeleteAlias(domainId: string) {
     mutationFn: (id: string) => api.del<Ok>(`/api/admin/aliases/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.domain(domainId) });
+      void qc.invalidateQueries({ queryKey: qk.setupSteps });
       void qc.invalidateQueries({ queryKey: qk.domains });
     },
   });
+}
+export function useSetupSteps(enabled = true) {
+  return useQuery({ queryKey: qk.setupSteps, queryFn: () => api.get<SetupStep[]>("/api/admin/setup-steps"), enabled, staleTime: 60_000 });
+}
+function useSetupStepMutation<T>(fn: (body: T) => Promise<SetupStep[]>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (steps) => {
+      qc.setQueryData(qk.setupSteps, steps);
+      void qc.invalidateQueries({ queryKey: qk.domains });
+      void qc.invalidateQueries({ queryKey: ["admin", "domain"] });
+    },
+  });
+}
+export function useApplyReportAddresses() {
+  return useSetupStepMutation((body: ReportAddressesApply) => api.post<SetupStep[]>("/api/admin/setup-steps/report-addresses", body));
+}
+export function useSkipSetupStep() {
+  return useSetupStepMutation(({ key, skipped }: { key: SetupStepKey; skipped: boolean }) => api.post<SetupStep[]>(`/api/admin/setup-steps/${key}/skip`, { skipped }));
 }
 export function useServerStatus() {
   return useQuery({ queryKey: qk.status, queryFn: () => api.get<ServerStatus>("/api/admin/status"), refetchInterval: 30_000 });

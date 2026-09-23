@@ -21,7 +21,8 @@ import { AdminOverviewPage } from "./routes/admin/Overview";
 import { AdminMailPage, type MailSearch } from "./routes/admin/MailFlow";
 import { AdminSecurityPage, type SecuritySearch } from "./routes/admin/Security";
 import { AdminLogsPage, type LogsSearch } from "./routes/admin/Logs";
-import { AuthSourceSchema, LogLevelSchema, LogSourceSchema, MailDirectionSchema, MailLogStatusSchema, OverviewRangeSchema, type OverviewRange } from "@ionnet/shared";
+import { AdminSetupStepsPage } from "./routes/admin/SetupSteps";
+import { AuthSourceSchema, LogLevelSchema, LogSourceSchema, MailDirectionFilterSchema, MailLogStatusSchema, OverviewRangeSchema, type OverviewRange } from "@ionnet/shared";
 import { NotFoundPage } from "./routes/NotFound";
 
 export interface RouterContext {
@@ -134,7 +135,7 @@ const adminMailRoute = createRoute({
     strip({
       tab: s.tab === "log" || s.tab === "queue" || s.tab === "spam" ? s.tab : undefined,
       q: text(s.q),
-      direction: param(MailDirectionSchema, s.direction),
+      direction: param(MailDirectionFilterSchema, s.direction),
       status: s.status === "problems" ? ("problems" as const) : param(MailLogStatusSchema, s.status),
     }),
   component: AdminMailPage,
@@ -167,6 +168,7 @@ const adminDomainDetailRoute = createRoute({
   component: AdminDomainDetailPage,
 });
 const adminStatusRoute = createRoute({ getParentRoute: () => adminRoute, path: "/status", component: AdminStatusPage });
+const adminSetupStepsRoute = createRoute({ getParentRoute: () => adminRoute, path: "/setup", component: AdminSetupStepsPage });
 
 const routeTree = rootRoute.addChildren([
   setupRoute,
@@ -180,6 +182,7 @@ const routeTree = rootRoute.addChildren([
     adminRoute.addChildren([
       adminIndexRoute,
       adminOverviewRoute,
+      adminSetupStepsRoute,
       adminDomainsRoute,
       adminDomainDetailRoute,
       adminMailRoute,

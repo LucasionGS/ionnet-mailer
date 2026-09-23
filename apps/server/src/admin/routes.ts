@@ -9,10 +9,13 @@ import {
   LogSourceSchema,
   MailboxCreateSchema,
   MailboxUpdateSchema,
-  MailDirectionSchema,
+  MailDirectionFilterSchema,
   MailLogStatusSchema,
   OverviewRangeSchema,
   QueueActionSchema,
+  ReportAddressesApplySchema,
+  SetupStepKeySchema,
+  SetupStepSkipSchema,
 } from "@ionnet/shared";
 import type { AppEnv } from "../http/types.ts";
 import { requireAdmin, requireAuth } from "../http/middleware.ts";
@@ -50,6 +53,7 @@ import { pageParams } from "../activity/paging.ts";
 import { buildOverview } from "./overview.ts";
 import { spamHistory } from "./spam.ts";
 import { listWebSessions, revokeWebSession } from "./sessions.ts";
+import { applyReportAddresses, listSetupSteps, setStepSkipped } from "./setup-steps.ts";
 
 export const adminRoutes = new Hono<AppEnv>();
 adminRoutes.use("*", requireAuth, requireAdmin);
@@ -227,13 +231,33 @@ adminRoutes.delete("/sessions/:id", async (c) => {
 
 adminRoutes.get("/audit", async (c) => c.json(await listAudit({ ...pageParams((k) => c.req.query(k)), q: c.req.query("q") || undefined })));
 
+// ---- setup steps ---------------------------------------------------------------
+adminRoutes.get("/setup-steps", async (c) => c.json(await listSetupSteps()));
+
+adminRoutes.post("/setup-steps/report-addresses", async (c) => {
+  const body = await parseJson(c, ReportAddressesApplySchema);
+  const r = await applyReportAddresses(body);
+  if (r.mailbox) await audit(c, "mailbox.create", r.mailbox.email, { quotaBytes: 0, isAdmin: false });
+  await audit(c, "setup.report_addresses", r.destination, { addresses: r.addresses });
+  return c.json(await listSetupSteps());
+});
+
+adminRoutes.post("/setup-steps/:key/skip", async (c) => {
+  const key = SetupStepKeySchema.safeParse(c.req.param("key"));
+  if (!key.success) throw notFound("Unknown setup step");
+  const { skipped } = await parseJson(c, SetupStepSkipSchema);
+  await setStepSkipped(key.data, skipped);
+  await audit(c, skipped ? "setup.skip" : "setup.reopen", key.data);
+  return c.json(await listSetupSteps());
+});
+
 // ---- mail flow: log, queue, spam filter ----------------------------------------
 adminRoutes.get("/mail-log", async (c) => {
   const status = c.req.query("status");
   return c.json(
     await listMailLog({
       ...pageParams((k) => c.req.query(k)),
-      direction: pick(MailDirectionSchema, c.req.query("direction")),
+      direction: pick(MailDirectionFilterSchema, c.req.query("direction")),
       status: status === "problems" ? "problems" : pick(MailLogStatusSchema, status),
       q: c.req.query("q") || undefined,
     }),

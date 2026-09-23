@@ -1,6 +1,6 @@
 import { Op, QueryTypes, type WhereOptions } from "sequelize";
 import { decodeWords } from "postal-mime";
-import type { MailDirection, MailLogEntry, MailLogStatus, Page } from "@ionnet/shared";
+import type { MailDirection, MailDirectionFilter, MailLogEntry, MailLogStatus, Page } from "@ionnet/shared";
 import { Domain, MailLogRow } from "../db/models.ts";
 import { sequelize } from "../db/sequelize.ts";
 import { likePattern, pageOf } from "./paging.ts";
@@ -46,6 +46,16 @@ async function isLocalAddress(address: string): Promise<boolean> {
     localDomains = { names: new Set(rows.map((d) => d.name.toLowerCase())), loadedAt: Date.now() };
   }
   return localDomains.names.has(address.split("@").pop()?.toLowerCase() ?? "");
+}
+
+/**
+ * Port 25 has no sign-in, so a reject there to a domain we don't host is someone
+ * probing for an open relay, not mail our users sent.
+ */
+async function rejectDirection(rcpt: string, source: string): Promise<MailDirection> {
+  if (rcpt && (await isLocalAddress(rcpt))) return "in";
+  if (source === "smtp") return rcpt ? "relay" : "in";
+  return "out";
 }
 
 /** Postfix logs the raw header; decode RFC 2047 words and drop the "?" it prints for folded lines. */
@@ -213,10 +223,11 @@ async function apply(e: PostfixEvent, time: Date, syslogName: string): Promise<v
     case "reject": {
       const rcpt = e.to ?? "";
       const ctx = e.qid ? (contexts.get(e.qid) ?? null) : null;
+      const source = sourceOf(syslogName);
       await upsert({
         queueId: e.qid,
         recipient: rcpt,
-        direction: rcpt && (await isLocalAddress(rcpt)) ? "in" : "out",
+        direction: await rejectDirection(rcpt, source),
         status: "rejected",
         ctx,
         sender: e.from,
@@ -224,7 +235,7 @@ async function apply(e: PostfixEvent, time: Date, syslogName: string): Promise<v
         relay: null,
         dsn: e.dsn,
         detail: `${e.stage}: ${e.detail}`,
-        source: sourceOf(syslogName),
+        source,
         clientHost: e.clientHost,
         clientIp: e.clientIp,
         at: time,
@@ -269,7 +280,8 @@ export function toMailLogDto(r: MailLogRow): MailLogEntry {
 }
 
 export interface MailLogFilter {
-  direction?: MailDirection;
+  /** left out: incoming and outgoing, without relay attempts */
+  direction?: MailDirectionFilter;
   /** a single status, or "problems" for deferred + bounced + expired */
   status?: MailLogStatus | "problems";
   q?: string;
@@ -279,7 +291,8 @@ export interface MailLogFilter {
 
 export async function listMailLog(f: MailLogFilter): Promise<Page<MailLogEntry>> {
   const where: WhereOptions<MailLogRow>[] = [];
-  if (f.direction) where.push({ direction: f.direction });
+  if (!f.direction) where.push({ direction: { [Op.ne]: "relay" } });
+  else if (f.direction !== "all") where.push({ direction: f.direction });
   if (f.status === "problems") where.push({ status: { [Op.in]: ["deferred", "bounced", "expired"] } });
   else if (f.status) where.push({ status: f.status });
   if (f.q) {

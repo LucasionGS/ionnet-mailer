@@ -47,7 +47,10 @@
  *   GET    /api/admin/auth-events/failed-ips?hours=            -> FailedIp[]
  *   GET    /api/admin/sessions                  -> WebSession[]
  *   DELETE /api/admin/sessions/:id              -> { ok }
- *   GET    /api/admin/mail-log?direction=&status=&q=&before=   -> Page<MailLogEntry>
+ *   GET    /api/admin/setup-steps               -> SetupStep[]
+ *   POST   /api/admin/setup-steps/report-addresses   ReportAddressesApply -> SetupStep[]
+ *   POST   /api/admin/setup-steps/:key/skip     SetupStepSkip -> SetupStep[]
+ *   GET    /api/admin/mail-log?direction=&status=&q=&before=   -> Page<MailLogEntry>  (direction: MailDirectionFilter, relay attempts only with relay|all)
  *   GET    /api/admin/queue                     -> QueueSnapshot
  *   POST   /api/admin/queue/flush               -> { ok }                    (retry every deferred message now)
  *   POST   /api/admin/queue/:queueId/:action    -> { ok }                    (action: QueueAction)
@@ -278,6 +281,42 @@ export const DomainDetailSchema = DomainSchema.extend({
 export type DomainDetail = z.infer<typeof DomainDetailSchema>;
 
 // ---------------------------------------------------------------------------
+// Admin: setup steps (run by the wizard after the first mailbox exists, and any time later)
+// ---------------------------------------------------------------------------
+export const SetupStepKeySchema = z.enum(["report-addresses"]);
+export type SetupStepKey = z.infer<typeof SetupStepKeySchema>;
+
+/** todo = something is missing; skipped = an admin chose to handle it themselves. */
+export const SetupStepStateSchema = z.enum(["done", "todo", "skipped"]);
+export type SetupStepState = z.infer<typeof SetupStepStateSchema>;
+
+export const SetupStepSchema = z.object({
+  key: SetupStepKeySchema,
+  title: z.string(),
+  description: z.string(),
+  state: SetupStepStateSchema,
+  /** What the step checks, one line each, e.g. an address and where it delivers. */
+  items: z.array(z.object({ label: z.string(), done: z.boolean(), detail: z.string() })),
+});
+export type SetupStep = z.infer<typeof SetupStepSchema>;
+
+/** dmarc@ and tlsrpt@ of every domain: forwarded to an existing address, or to a new mailbox made for them. */
+export const ReportAddressesApplySchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("forward"), destination: EmailSchema }),
+  z.object({
+    mode: z.literal("mailbox"),
+    domainId: z.string(),
+    localPart: LocalPartSchema,
+    displayName: z.string().trim().min(1).max(120),
+    password: PasswordSchema,
+  }),
+]);
+export type ReportAddressesApply = z.infer<typeof ReportAddressesApplySchema>;
+
+export const SetupStepSkipSchema = z.object({ skipped: z.boolean() });
+export type SetupStepSkip = z.infer<typeof SetupStepSkipSchema>;
+
+// ---------------------------------------------------------------------------
 // DNS guide
 // ---------------------------------------------------------------------------
 export const DnsRecordTypeSchema = z.enum(["MX", "A", "AAAA", "TXT", "SRV", "CNAME", "PTR"]);
@@ -390,8 +429,12 @@ export const FailedIpSchema = z.object({
 });
 export type FailedIp = z.infer<typeof FailedIpSchema>;
 
-export const MailDirectionSchema = z.enum(["in", "out"]);
+/** relay = an unauthenticated client on port 25 tried to send to a domain this server does not host. */
+export const MailDirectionSchema = z.enum(["in", "out", "relay"]);
 export type MailDirection = z.infer<typeof MailDirectionSchema>;
+/** The mail log's direction filter; left out, it shows "in" and "out" but hides relay attempts. */
+export const MailDirectionFilterSchema = z.enum(["in", "out", "relay", "all"]);
+export type MailDirectionFilter = z.infer<typeof MailDirectionFilterSchema>;
 
 /** delivered = stored in a local mailbox, sent = accepted by the remote server, deleted = removed from the queue by an admin. */
 export const MailLogStatusSchema = z.enum(["delivered", "sent", "deferred", "bounced", "expired", "rejected", "deleted"]);

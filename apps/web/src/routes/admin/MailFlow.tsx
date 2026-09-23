@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowDownLeft, ArrowUpRight, CircleCheck, Copy, Ellipsis, Mails, Pause, Play, RefreshCw, RotateCw, ServerCrash, Trash2 } from "lucide-react";
-import type { MailDirection, MailLogEntry, MailLogStatus, QueueMessage, SpamScan } from "@ionnet/shared";
+import { ArrowDownLeft, ArrowUpRight, CircleCheck, ShieldX, Copy, Ellipsis, Mails, Pause, Play, RefreshCw, RotateCw, ServerCrash, Trash2 } from "lucide-react";
+import type { MailDirection, MailDirectionFilter, MailLogEntry, MailLogStatus, QueueMessage, SpamScan } from "@ionnet/shared";
 import { formatBytes } from "@ionnet/shared";
 import { useFlushQueue, useMailLog, useQueue, useQueueAction, useSpamHistory } from "@/lib/queries";
 import { toast } from "@/lib/toast";
@@ -15,7 +15,7 @@ type Tab = "log" | "queue" | "spam";
 export interface MailSearch {
   tab?: Tab;
   q?: string;
-  direction?: MailDirection;
+  direction?: MailDirectionFilter;
   status?: MailLogStatus | "problems";
 }
 
@@ -49,12 +49,18 @@ function StatusBadge({ e }: { e: MailLogEntry }) {
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
 
+const DIRECTION: Record<MailDirection, { label: string; title: string; icon: ReactNode; className: string }> = {
+  in: { label: "Incoming", title: "Incoming message", icon: <ArrowDownLeft size={13} />, className: "bg-accent-soft text-accent" },
+  out: { label: "Outgoing", title: "Outgoing message", icon: <ArrowUpRight size={13} />, className: "bg-surface-2 text-fg-muted" },
+  relay: { label: "Relay attempt", title: "Relay attempt", icon: <ShieldX size={13} />, className: "bg-surface-2 text-fg-faint" },
+};
+
 function DirectionIcon({ direction }: { direction: MailDirection }) {
-  const label = direction === "in" ? "Incoming" : "Outgoing";
+  const d = DIRECTION[direction];
   return (
-    <Tooltip content={label}>
-      <span className={cn("flex h-6 w-6 items-center justify-center rounded-full", direction === "in" ? "bg-accent-soft text-accent" : "bg-surface-2 text-fg-muted")} aria-label={label}>
-        {direction === "in" ? <ArrowDownLeft size={13} /> : <ArrowUpRight size={13} />}
+    <Tooltip content={d.label}>
+      <span className={cn("flex h-6 w-6 items-center justify-center rounded-full", d.className)} aria-label={d.label}>
+        {d.icon}
       </span>
     </Tooltip>
   );
@@ -65,8 +71,8 @@ const REJECT_STAGE: Record<string, string> = {
   CONNECT: "on connect",
   EHLO: "at the greeting",
   HELO: "at the greeting",
-  MAIL: "at the sender",
-  RCPT: "at the recipient",
+  MAIL: "at the sender step",
+  RCPT: "at the recipient step",
   DATA: "before the content",
   "END-OF-MESSAGE": "after the content scan",
 };
@@ -123,7 +129,7 @@ function MailLogDetail({ e, onClose, onShowMessage }: { e: MailLogEntry; onClose
       onOpenChange={(o) => !o && onClose()}
       size="lg"
       title={e.subject || "(no subject)"}
-      description={`${e.direction === "in" ? "Incoming" : "Outgoing"} message, ${fullTime(e.firstAt)}`}
+      description={`${DIRECTION[e.direction].title}, ${fullTime(e.firstAt)}`}
       footer={
         e.queueId ? (
           <Button variant="outline" size="sm" onClick={() => onShowMessage(e.queueId!)}>
@@ -132,6 +138,12 @@ function MailLogDetail({ e, onClose, onShowMessage }: { e: MailLogEntry; onClose
         ) : undefined
       }
     >
+      {e.direction === "relay" && (
+        <p className="mb-4 text-sm text-fg-muted">
+          A server that did not sign in asked this server to pass mail on to a domain it doesn't host. This is usually a bot checking for an open relay. It was
+          refused and nothing was sent.
+        </p>
+      )}
       <dl className="grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-4 gap-y-2">
         <Field label="Status">
           <span className="inline-flex flex-wrap items-center gap-2">
@@ -199,11 +211,13 @@ function MailLogTab({ search, setSearch }: { search: MailSearch; setSearch: (s: 
         <Select
           aria-label="Direction"
           value={search.direction ?? ""}
-          onChange={(e) => setSearch({ direction: (e.target.value || undefined) as MailDirection | undefined })}
+          onChange={(e) => setSearch({ direction: (e.target.value || undefined) as MailDirectionFilter | undefined })}
           options={[
-            { value: "", label: "Both directions" },
+            { value: "", label: "Incoming and outgoing" },
             { value: "in", label: "Incoming" },
             { value: "out", label: "Outgoing" },
+            { value: "relay", label: "Relay attempts" },
+            { value: "all", label: "Everything, with relay attempts" },
           ]}
         />
         <Select

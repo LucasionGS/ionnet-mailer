@@ -68,6 +68,14 @@ export function describeAudit(a: AuditEntry): string {
       return `Released queued message ${t}`;
     case "queue.delete":
       return `Deleted queued message ${t}`;
+    case "setup.report_addresses": {
+      const addresses = Array.isArray(d.addresses) ? d.addresses.map(String) : [];
+      return `Pointed ${addresses.length ? addresses.join(", ") : "the report addresses"} at ${t}`;
+    }
+    case "setup.skip":
+      return `Skipped setup step ${t}`;
+    case "setup.reopen":
+      return `Reopened setup step ${t}`;
     case "account.password_change":
       return "Changed their own password";
     default:

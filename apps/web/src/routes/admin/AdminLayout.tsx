@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { ArrowLeft, Globe, LayoutDashboard, Mails, ScrollText, Server, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Globe, LayoutDashboard, ListChecks, Mails, ScrollText, Server, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePendingSetupSteps } from "@/features/admin/SetupSteps";
 
 const NAV = [
   { to: "/admin/overview", label: "Overview", icon: LayoutDashboard },
+  { to: "/admin/setup", label: "Setup steps", icon: ListChecks },
   { to: "/admin/domains", label: "Domains", icon: Globe },
   { to: "/admin/mail", label: "Mail flow", icon: Mails },
   { to: "/admin/security", label: "Security", icon: ShieldCheck },
@@ -12,8 +14,19 @@ const NAV = [
   { to: "/admin/status", label: "System", icon: Server },
 ] as const;
 
+function Count({ n, label }: { n: number; label: string }) {
+  if (!n) return null;
+  return (
+    <span className="ml-auto flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-warning px-1 text-[11px] font-semibold text-white" aria-label={label}>
+      {n}
+    </span>
+  );
+}
+
 export function AdminLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pendingSteps = usePendingSetupSteps();
+  const count = (to: string) => (to === "/admin/setup" ? pendingSteps : 0);
   return (
     <div className="flex h-full min-h-0 max-md:flex-col">
       <nav aria-label="Administration" className="flex w-52 shrink-0 flex-col gap-0.5 border-r p-3 max-md:hidden">
@@ -32,6 +45,7 @@ export function AdminLayout() {
             >
               <Icon size={16} />
               {label}
+              <Count n={count(to)} label={`${count(to)} to do`} />
             </Link>
           );
         })}
@@ -48,6 +62,7 @@ export function AdminLayout() {
             >
               <Icon size={13} />
               {label}
+              <Count n={count(to)} label={`${count(to)} to do`} />
             </Link>
           );
         })}

@@ -60,7 +60,7 @@ async function series(range: OverviewRange, tz: string) {
       `SELECT date_trunc(:unit, created_at, :tz) AS t,
               count(*) FILTER (WHERE direction = 'in' AND status = 'delivered')::int AS received,
               count(*) FILTER (WHERE direction = 'out' AND status = 'sent')::int AS sent,
-              count(*) FILTER (WHERE status = 'rejected')::int AS rejected,
+              count(*) FILTER (WHERE status = 'rejected' AND direction <> 'relay')::int AS rejected,
               count(*) FILTER (WHERE status IN ('bounced', 'expired'))::int AS bounced
          FROM mail_log WHERE created_at >= :from GROUP BY 1`,
       { replacements: { ...replacements, from }, type: QueryTypes.SELECT },
