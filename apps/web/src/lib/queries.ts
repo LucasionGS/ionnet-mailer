@@ -1,5 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type {
+  Account,
   AddressSuggestion,
   AuditEntry,
   AuthEvent,
@@ -57,11 +58,13 @@ import type {
   ThreadList,
   ThreadSummary,
 } from "@ionnet/shared";
-import { api, isApiError } from "./api";
+import { api, isApiError, setActiveAccount } from "./api";
+import { rememberAccounts } from "./accounts";
 
 export const qk = {
   setupStatus: ["setup", "status"] as const,
   me: ["auth", "me"] as const,
+  accounts: ["auth", "accounts"] as const,
   folders: ["mail", "folders"] as const,
   threads: (folder: string, q: string) => ["mail", "threads", folder, q] as const,
   thread: (folder: string, id: string) => ["mail", "thread", folder, id] as const,
@@ -129,7 +132,11 @@ export const setupApi = {
 // ---- auth ----------------------------------------------------------------
 export const meQuery = {
   queryKey: qk.me,
-  queryFn: () => api.get<Me>("/api/auth/me"),
+  queryFn: async () => {
+    const me = await api.get<Me>("/api/auth/me");
+    setActiveAccount(me.id);
+    return me;
+  },
   staleTime: 5 * 60_000,
   retry: false,
 };
@@ -148,16 +155,24 @@ export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: LoginRequest) => api.post<Me>("/api/auth/login", body),
-    onSuccess: (me) => qc.setQueryData(qk.me, me),
+    onSuccess: (me) => {
+      setActiveAccount(me.id);
+      rememberAccounts([me]);
+      qc.setQueryData(qk.me, me);
+    },
   });
 }
-export function useLogout() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.post<Ok>("/api/auth/logout"),
-    onSettled: () => {
-      qc.clear();
+/** Every mailbox signed in on this browser, with inbox unread counts for the switcher. */
+export function useAccounts() {
+  return useQuery({
+    queryKey: qk.accounts,
+    queryFn: async () => {
+      const list = await api.get<Account[]>("/api/auth/accounts");
+      rememberAccounts(list);
+      return list;
     },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 export function useUpdateProfile() {

@@ -46,11 +46,12 @@ const setupRoute = createRoute({ getParentRoute: () => rootRoute, path: "/setup"
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
-  validateSearch: (s: Record<string, unknown>): { redirect?: string } =>
-    typeof s.redirect === "string" ? { redirect: s.redirect } : {},
+  // `add` signs in to another mailbox while staying signed in to the current one; `email` fills in the address.
+  validateSearch: (s: Record<string, unknown>): { redirect?: string; add?: boolean; email?: string } =>
+    strip({ redirect: text(s.redirect), add: s.add === true || s.add === "true" ? true : undefined, email: text(s.email) }),
   beforeLoad: async ({ context, search }) => {
     const me = await fetchMeOrNull(context.queryClient);
-    if (me) throw redirect({ to: search.redirect ?? "/mail" });
+    if (me && !search.add) throw redirect({ to: search.redirect ?? "/mail" });
   },
   component: LoginPage,
 });

@@ -16,8 +16,10 @@
  *
  *  Auth
  *   POST /api/auth/login                        LoginRequest -> Me
- *   POST /api/auth/logout                       -> { ok }
+ *   POST /api/auth/logout                       LogoutRequest -> LogoutResult  (active account, one by id, or all)
  *   GET  /api/auth/me                           -> Me
+ *   GET  /api/auth/accounts                     -> Account[]  (every mailbox signed in on this browser)
+ *   POST /api/auth/switch                       SwitchAccountRequest -> Me
  *
  *  Account (self-service)
  *   PATCH /api/account/profile                  ProfileUpdate -> Me
@@ -148,6 +150,34 @@ export const MeSchema = z.object({
   sendAs: z.array(z.string()).default([]),
 });
 export type Me = z.infer<typeof MeSchema>;
+
+/** How many mailboxes one browser can be signed in to at once. */
+export const MAX_ACCOUNTS = 5;
+
+/** A mailbox signed in on this browser, for the account switcher. */
+export const AccountSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string(),
+  active: z.boolean(),
+  /** unread messages in the inbox; null when the mail store could not be asked */
+  unread: z.number().nullable(),
+});
+export type Account = z.infer<typeof AccountSchema>;
+
+export const SwitchAccountRequestSchema = z.object({ mailboxId: z.uuid() });
+export type SwitchAccountRequest = z.infer<typeof SwitchAccountRequestSchema>;
+
+/** Empty signs out the active account; `mailboxId` picks another signed-in account; `all` signs out every one. */
+export const LogoutRequestSchema = z.object({ all: z.boolean().optional(), mailboxId: z.uuid().optional() });
+export type LogoutRequest = z.infer<typeof LogoutRequestSchema>;
+
+/** `active` is the account that is active afterwards (another one takes over when the active one leaves); null when none is left. */
+export const LogoutResultSchema = z.object({ ok: z.literal(true), active: MeSchema.nullable() });
+export type LogoutResult = z.infer<typeof LogoutResultSchema>;
+
+/** Header the web client sends with the mailbox id it believes is active, so a stale tab can't act as another account. */
+export const ACCOUNT_HEADER = "X-Account-Id";
 
 export const ProfileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(120).optional(),

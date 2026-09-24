@@ -23,6 +23,11 @@ function track(p: Pending, on: boolean) {
   else window.removeEventListener("beforeunload", warnBeforeUnload);
 }
 
+/** True while a message is waiting out its undo window or still uploading. */
+export function hasPendingSends() {
+  return pending.size > 0;
+}
+
 /**
  * Send a message after the user's undo window. The composer is already closed by the time this runs, so
  * `restore` carries everything needed to reopen it, both for Undo and for a failed send.

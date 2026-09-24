@@ -8,7 +8,7 @@ import { invalidateMail } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Button, Checkbox, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
-import { closeComposer, getComposer, updateComposer, type ComposerState, type Recipient } from "./composerStore";
+import { closeComposer, getComposer, registerComposerFlush, updateComposer, type ComposerState, type Recipient } from "./composerStore";
 import { RecipientInput } from "./RecipientInput";
 import { EditorArea, EditorToolbar, insertImages, useMailEditor } from "./Editor";
 import { HtmlFrame } from "./HtmlFrame";
@@ -170,9 +170,10 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
     };
   };
 
-  const doSaveDraft = async (silent = true) => {
+  /** Resolves false when the save failed. */
+  const doSaveDraft = async (silent = true): Promise<boolean> => {
     const snap = snapshot();
-    if (snap === lastSaved.current || isEmpty()) return;
+    if (snap === lastSaved.current || isEmpty()) return true;
     setSaving(true);
     try {
       const open = getComposer();
@@ -185,9 +186,11 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
       setSaveFailed(false);
       invalidateMail(qc);
       if (!silent) toast.success("Draft saved");
+      return true;
     } catch (err) {
       setSaveFailed(true);
       if (!silent) toast.error("Could not save draft", errorMessage(err));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -237,6 +240,20 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
     finished.current = true;
     closeComposer(state.key);
   };
+
+  // Switching or adding an account reloads the app, so the composer is saved to Drafts and closed first.
+  useEffect(
+    () =>
+      registerComposerFlush(async () => {
+        if (timer.current) clearTimeout(timer.current);
+        if (!(await saveRef.current(true))) return false;
+        finished.current = true;
+        closeComposer(state.key);
+        return true;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const discard = () => {
     if (timer.current) clearTimeout(timer.current);

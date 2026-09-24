@@ -1,18 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { BookUser, LogOut, Mail, Menu as MenuIcon, Monitor, Moon, Search, Settings, ShieldCheck, Sun, X } from "lucide-react";
-import { useMe, useLogout, useFolders } from "@/lib/queries";
-import { useTheme, type ThemeSetting } from "@/lib/theme";
+import { BookUser, Mail, Menu as MenuIcon, Search, Settings, ShieldCheck, X } from "lucide-react";
+import { useMe, useFolders } from "@/lib/queries";
 import { getPrefs, setPrefs } from "@/lib/prefs";
 import { SEARCH_INPUT_ID, setDrawerOpen } from "@/lib/ui";
-import { cn, decodeFolder, encodeFolder, initials, avatarColor } from "@/lib/utils";
+import { cn, decodeFolder, encodeFolder } from "@/lib/utils";
 import { IconButton } from "./ui/IconButton";
-import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./ui/Menu";
 import { Tooltip } from "./ui/Tooltip";
 import { Composer } from "@/features/mail/Composer";
 import { useComposer } from "@/features/mail/composerStore";
 import { useMailEvents } from "@/features/mail/useMailEvents";
 import { usePendingSetupSteps } from "@/features/admin/SetupSteps";
+import { AccountMenu } from "@/features/account/AccountMenu";
 import { APP_NAME } from "@ionnet/shared";
 
 interface NavItem {
@@ -99,10 +98,7 @@ function SearchBox() {
 
 export function AppShell() {
   const { data: me } = useMe();
-  const logout = useLogout();
-  const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const [theme, setTheme] = useTheme();
   const composer = useComposer();
   const { data: folders } = useFolders();
   const inboxUnread = folders?.find((f) => f.specialUse === "inbox")?.unread ?? 0;
@@ -120,12 +116,6 @@ export function AppShell() {
     { to: "/contacts", match: "/contacts", label: "Contacts", icon: <BookUser size={19} /> },
     { to: "/settings", match: "/settings", label: "Settings", icon: <Settings size={19} /> },
     ...(me?.isAdmin ? [{ to: "/admin/overview", match: "/admin", label: "Admin", icon: <ShieldCheck size={19} />, badge: pendingSteps, alert: true }] : []),
-  ];
-
-  const themeOptions: Array<{ v: ThemeSetting; label: string; icon: React.ReactNode }> = [
-    { v: "system", label: "System", icon: <Monitor size={14} /> },
-    { v: "light", label: "Light", icon: <Sun size={14} /> },
-    { v: "dark", label: "Dark", icon: <Moon size={14} /> },
   ];
 
   // An inline reply stays with its conversation; anywhere else the same composer shows up as the docked window.
@@ -158,49 +148,7 @@ export function AppShell() {
         <div className="flex min-w-0 flex-1 justify-start">
           <SearchBox />
         </div>
-        {me && (
-          <Menu
-            align="end"
-            trigger={
-              <button
-                type="button"
-                className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ring-offset-2 ring-offset-bg transition-shadow hover:ring-2 hover:ring-border-strong"
-                style={{ background: avatarColor(me.email) }}
-                aria-label="Account menu"
-              >
-                {initials(me.displayName || me.email)}
-              </button>
-            }
-          >
-            <MenuLabel>
-              <div className="truncate text-sm text-fg">{me.displayName}</div>
-              <div className="truncate font-normal">{me.email}</div>
-            </MenuLabel>
-            <MenuSeparator />
-            <MenuLabel>Theme</MenuLabel>
-            {themeOptions.map((o) => (
-              <MenuItem key={o.v} icon={o.icon} checked={theme === o.v} onSelect={() => setTheme(o.v)}>
-                {o.label}
-              </MenuItem>
-            ))}
-            <MenuSeparator />
-            <MenuItem icon={<Settings size={14} />} onSelect={() => navigate({ to: "/settings" })}>
-              Settings
-            </MenuItem>
-            <MenuItem
-              icon={<LogOut size={14} />}
-              onSelect={() => {
-                logout.mutate(undefined, {
-                  onSettled: () => {
-                    window.location.href = "/login";
-                  },
-                });
-              }}
-            >
-              Sign out
-            </MenuItem>
-          </Menu>
-        )}
+        {me && <AccountMenu me={me} />}
       </header>
 
       <div className="flex min-h-0 flex-1">

@@ -1,4 +1,4 @@
-import { MAIL_EVENT_TYPES, type ApiError, type DraftRequest, type MailEvent, type SendRequest } from "@ionnet/shared";
+import { ACCOUNT_HEADER, MAIL_EVENT_TYPES, type ApiError, type DraftRequest, type MailEvent, type SendRequest } from "@ionnet/shared";
 
 export class ApiClientError extends Error {
   status: number;
@@ -36,6 +36,31 @@ function withQuery(path: string, query?: Query): string {
   return qs ? `${path}?${qs}` : path;
 }
 
+let accountId: string | null = null;
+
+/**
+ * The mailbox this tab works as. Requests carry it so the server can refuse them once another tab has switched the
+ * browser to a different account.
+ */
+export function setActiveAccount(id: string | null) {
+  accountId = id;
+}
+
+function accountHeaders(): Record<string, string> {
+  return accountId ? { [ACCOUNT_HEADER]: accountId } : {};
+}
+
+let onAccountChanged = () => window.location.reload();
+
+/** What to do when the server says another tab switched accounts; by default start over as the new account. */
+export function setAccountChangedHandler(fn: () => void) {
+  onAccountChanged = fn;
+}
+
+function checkAccountChanged(err: ApiClientError) {
+  if (err.status === 409 && err.error === "account_changed") onAccountChanged();
+}
+
 async function parseError(res: Response): Promise<ApiClientError> {
   let body: ApiError = { error: "http_error", message: `${res.status} ${res.statusText}` };
   try {
@@ -54,7 +79,7 @@ async function parseError(res: Response): Promise<ApiClientError> {
 }
 
 async function request<T>(method: string, path: string, init: { body?: unknown; query?: Query; headers?: Record<string, string>; raw?: BodyInit } = {}): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json", ...(init.headers ?? {}) };
+  const headers: Record<string, string> = { Accept: "application/json", ...accountHeaders(), ...(init.headers ?? {}) };
   let body: BodyInit | undefined;
   if (init.raw !== undefined) {
     body = init.raw;
@@ -63,7 +88,11 @@ async function request<T>(method: string, path: string, init: { body?: unknown; 
     body = JSON.stringify(init.body);
   }
   const res = await fetch(withQuery(path, init.query), { method, headers, body, credentials: "include" });
-  if (!res.ok) throw await parseError(res);
+  if (!res.ok) {
+    const err = await parseError(res);
+    checkAccountChanged(err);
+    throw err;
+  }
   if (res.status === 204) return undefined as T;
   const ct = res.headers.get("content-type") ?? "";
   if (ct.includes("application/json")) return (await res.json()) as T;
@@ -106,6 +135,7 @@ export function sendMail(payload: SendRequest, files: File[], onProgress?: (frac
     xhr.open("POST", "/api/mail/send");
     xhr.withCredentials = true;
     xhr.setRequestHeader("Accept", "application/json");
+    for (const [k, v] of Object.entries(accountHeaders())) xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onerror = () => reject(new Error("Network error"));
     xhr.onload = () => {
@@ -117,6 +147,7 @@ export function sendMail(payload: SendRequest, files: File[], onProgress?: (frac
       }
       if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { ok: true; messageId: string });
       const err = (body ?? {}) as Partial<ApiError>;
+      // An account_changed error is left to the caller, whose "Could not send" toast can still reopen the message.
       reject(new ApiClientError(xhr.status, { error: err.error ?? "http_error", message: err.message ?? `${xhr.status} ${xhr.statusText}`, details: err.details }));
     };
     xhr.send(fd);

@@ -93,6 +93,22 @@ export function updateComposer(patch: Partial<ComposerState>, forKey?: number) {
   emit();
 }
 
+let flush: (() => Promise<boolean>) | null = null;
+
+/** The mounted composer hands over a way to save itself as a draft and close; returns the unregister function. */
+export function registerComposerFlush(fn: () => Promise<boolean>) {
+  flush = fn;
+  return () => {
+    if (flush === fn) flush = null;
+  };
+}
+
+/** Saves the open composer to Drafts and closes it, before leaving the account. False when the draft didn't save. */
+export async function flushComposer(): Promise<boolean> {
+  if (!state) return true;
+  return flush ? flush() : true;
+}
+
 export function isComposerOpen() {
   return state !== null;
 }
