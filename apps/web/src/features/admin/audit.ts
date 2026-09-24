@@ -39,6 +39,8 @@ export function describeAudit(a: AuditEntry): string {
       if (keys.length === 1 && d.active === false) return `Disabled mailbox ${t}`;
       if (keys.length === 1 && d.active === true) return `Enabled mailbox ${t}`;
       if (keys.length === 1 && "password" in d) return `Reset the password of ${t}`;
+      if (keys.length === 1 && d.receiveMail === false) return `Made ${t} send-only`;
+      if (keys.length === 1 && d.receiveMail === true) return `Turned on receiving mail for ${t}`;
       if (keys.length === 1 && d.isAdmin === true) return `Made ${t} an administrator`;
       if (keys.length === 1 && d.isAdmin === false) return `Removed admin rights from ${t}`;
       if (keys.length === 1 && typeof d.quotaBytes === "number") return `Set the quota of ${t} to ${d.quotaBytes ? formatBytes(d.quotaBytes) : "unlimited"}`;

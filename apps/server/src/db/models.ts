@@ -40,6 +40,7 @@ export class MailboxRow extends Model<InferAttributes<MailboxRow>, InferCreation
   declare quotaBytes: CreationOptional<number>;
   declare isAdmin: CreationOptional<boolean>;
   declare active: CreationOptional<boolean>;
+  declare receiveMail: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
 }
 MailboxRow.init(
@@ -61,6 +62,7 @@ MailboxRow.init(
     },
     isAdmin: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    receiveMail: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   },
   { sequelize, tableName: "mailboxes" },

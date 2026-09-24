@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "node --experimental-strip-types --no-warnings src/seed.ts",
+    "cli": "node --experimental-strip-types --no-warnings src/cli.ts",
     "migrate": "node --experimental-strip-types --no-warnings src/db/migrate.ts",
     "migrate:create": "node --experimental-strip-types --no-warnings src/db/migrate.ts create"
   },

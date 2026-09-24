@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { KeyRound, Pencil, Plus, RefreshCw, SendHorizontal, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import type { DomainDetail, Mailbox, MailboxCreate, MailboxUpdate } from "@ionnet/shared";
 import { formatBytes } from "@ionnet/shared";
 import { useCreateMailbox, useDeleteMailbox, useMe, useRecalculateQuota, useUpdateMailbox } from "@/lib/queries";
@@ -24,6 +24,7 @@ function MailboxDialog({ domain, mailbox, onClose }: { domain: DomainDetail; mai
   const [password, setPassword] = useState("");
   const [quota, setQuota] = useState(String(mailbox?.quotaBytes ?? 0));
   const [isAdmin, setIsAdmin] = useState(mailbox?.isAdmin ?? false);
+  const [receiveMail, setReceiveMail] = useState(mailbox?.receiveMail ?? true);
   const create = useCreateMailbox(domain.id);
   const update = useUpdateMailbox(domain.id);
   const busy = create.isPending || update.isPending;
@@ -33,7 +34,7 @@ function MailboxDialog({ domain, mailbox, onClose }: { domain: DomainDetail; mai
     e.preventDefault();
     try {
       if (mailbox) {
-        const body: MailboxUpdate = { displayName: displayName.trim(), quotaBytes: Number(quota), isAdmin };
+        const body: MailboxUpdate = { displayName: displayName.trim(), quotaBytes: Number(quota), isAdmin, receiveMail };
         if (password) body.password = password;
         await update.mutateAsync({ id: mailbox.id, body });
         toast.success("Mailbox updated");
@@ -44,6 +45,7 @@ function MailboxDialog({ domain, mailbox, onClose }: { domain: DomainDetail; mai
           password,
           quotaBytes: Number(quota),
           isAdmin,
+          receiveMail,
         };
         await create.mutateAsync(body);
         toast.success(`Mailbox ${body.localPart}@${domain.name} created`);
@@ -96,6 +98,13 @@ function MailboxDialog({ domain, mailbox, onClose }: { domain: DomainDetail; mai
             <div className="text-xs text-fg-muted">Can manage domains, mailboxes and server settings.</div>
           </div>
           <Switch checked={isAdmin} onChange={setIsAdmin} label="Administrator" />
+        </div>
+        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+          <div>
+            <div className="text-sm font-medium">Receives mail</div>
+            <div className="text-xs text-fg-muted">Turn off for send-only addresses like noreply@. Mail sent to it is rejected.</div>
+          </div>
+          <Switch checked={receiveMail} onChange={setReceiveMail} label="Receives mail" />
         </div>
         <button type="submit" className="hidden" />
       </form>
@@ -162,6 +171,11 @@ export function MailboxesTab({ domain }: { domain: DomainDetail }) {
                             {m.isAdmin && (
                               <Badge tone="accent">
                                 <ShieldCheck size={11} /> admin
+                              </Badge>
+                            )}
+                            {!m.receiveMail && (
+                              <Badge tone="neutral">
+                                <SendHorizontal size={11} /> send-only
                               </Badge>
                             )}
                             {me?.id === m.id && <Badge tone="neutral">you</Badge>}

@@ -124,7 +124,7 @@ export const api = {
 };
 
 /** `onProgress` reports the upload as 0–1; only worth passing when there are attachments. */
-export function sendMail(payload: SendRequest, files: File[], onProgress?: (fraction: number) => void): Promise<{ ok: true; messageId: string }> {
+export function sendMail(payload: SendRequest, files: File[], onProgress?: (fraction: number) => void): Promise<{ ok: true; messageId: string; rejected: string[] }> {
   if (!onProgress) return api.multipart("POST", "/api/mail/send", payload, files);
   // fetch can't report upload progress, XMLHttpRequest can
   return new Promise((resolve, reject) => {
@@ -145,7 +145,7 @@ export function sendMail(payload: SendRequest, files: File[], onProgress?: (frac
       } catch {
         body = null;
       }
-      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { ok: true; messageId: string });
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body as { ok: true; messageId: string; rejected: string[] });
       const err = (body ?? {}) as Partial<ApiError>;
       // An account_changed error is left to the caller, whose "Could not send" toast can still reopen the message.
       reject(new ApiClientError(xhr.status, { error: err.error ?? "http_error", message: err.message ?? `${xhr.status} ${xhr.statusText}`, details: err.details }));

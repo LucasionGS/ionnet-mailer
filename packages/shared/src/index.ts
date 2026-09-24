@@ -260,6 +260,8 @@ export const MailboxSchema = z.object({
   usedBytes: z.number().nullable(),
   isAdmin: z.boolean(),
   active: z.boolean(),
+  /** false = send-only (e.g. noreply@): mail addressed to it is rejected */
+  receiveMail: z.boolean(),
   createdAt: z.string(),
 });
 export type Mailbox = z.infer<typeof MailboxSchema>;
@@ -270,6 +272,7 @@ export const MailboxCreateSchema = z.object({
   password: PasswordSchema,
   quotaBytes: z.number().int().min(0).default(0), // 0 = unlimited
   isAdmin: z.boolean().default(false),
+  receiveMail: z.boolean().default(true),
 });
 export type MailboxCreate = z.infer<typeof MailboxCreateSchema>;
 
@@ -279,6 +282,7 @@ export const MailboxUpdateSchema = z.object({
   quotaBytes: z.number().int().min(0).optional(),
   isAdmin: z.boolean().optional(),
   active: z.boolean().optional(),
+  receiveMail: z.boolean().optional(),
 });
 export type MailboxUpdate = z.infer<typeof MailboxUpdateSchema>;
 

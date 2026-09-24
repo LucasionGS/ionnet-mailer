@@ -1,0 +1,8 @@
+hosts = postgres
+user = mailreader
+password = @@MAIL_DB_PASSWORD@@
+dbname = @@POSTGRES_DB@@
+# Send-only mailboxes (noreply@ and the like) turn mail away at RCPT time, so the
+# sender's server reports it instead of this one bouncing it later.
+query = SELECT '550 5.1.1 This mailbox does not accept mail' FROM mailboxes
+        WHERE email = '%s' AND active AND NOT receive_mail

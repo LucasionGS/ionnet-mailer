@@ -44,7 +44,7 @@ interface ReportAddress {
   address: string;
   /** an active mailbox or alias receives it */
   ok: boolean;
-  /** a disabled mailbox holds the address, so no alias can be added for it */
+  /** a disabled or send-only mailbox holds the address, so no alias can be added for it */
   disabledMailbox: boolean;
   detail: string;
 }
@@ -60,17 +60,18 @@ async function reportAddresses(): Promise<ReportAddress[]> {
   return wanted.map((w) => {
     const mailbox = mailboxes.find((m) => m.email === w.address);
     const targets = aliases.filter((a) => a.source === w.address).map((a) => a.destination);
-    if (mailbox?.active) return { ...w, ok: true, disabledMailbox: false, detail: "Mailbox" };
+    if (mailbox?.active && mailbox.receiveMail) return { ...w, ok: true, disabledMailbox: false, detail: "Mailbox" };
+    if (mailbox?.active) return { ...w, ok: false, disabledMailbox: true, detail: "Send-only mailbox: turn on receiving, or delete it so an alias can take its place" };
     if (mailbox) return { ...w, ok: false, disabledMailbox: true, detail: "Disabled mailbox: enable it, or delete it so an alias can take its place" };
     if (targets.length) return { ...w, ok: true, disabledMailbox: false, detail: `Forwards to ${targets.join(", ")}` };
     return { ...w, ok: false, disabledMailbox: false, detail: "Missing: reports sent here bounce" };
   });
 }
 
-/** Whether mail to a local address would be accepted (it is an active mailbox or alias). */
+/** Whether mail to a local address would be accepted (it is an active, receiving mailbox or an alias). */
 async function deliverable(address: string): Promise<boolean> {
   const [mailbox, alias] = await Promise.all([
-    MailboxRow.findOne({ where: { email: address, active: true } }),
+    MailboxRow.findOne({ where: { email: address, active: true, receiveMail: true } }),
     AliasRow.findOne({ where: { source: address, active: true } }),
   ]);
   return !!(mailbox || alias);
@@ -83,7 +84,7 @@ async function deliverable(address: string): Promise<boolean> {
 export async function applyReportAddresses(input: ReportAddressesApply): Promise<{ addresses: string[]; destination: string; mailbox: MailboxRow | null }> {
   const missing = (await reportAddresses()).filter((r) => !r.ok);
   const blocked = missing.find((r) => r.disabledMailbox);
-  if (blocked) throw badRequest(`${blocked.address} is a disabled mailbox. Enable it, or delete it so an alias can take its place.`);
+  if (blocked) throw badRequest(`${blocked.address} is a mailbox that does not receive mail. Enable it, or delete it so an alias can take its place.`);
 
   const newMailboxDomain = input.mode === "mailbox" ? await requireDomain(input.domainId) : null;
   const destination = input.mode === "forward" ? input.destination : `${input.localPart}@${newMailboxDomain!.name}`;

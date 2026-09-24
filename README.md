@@ -35,7 +35,9 @@ checks your hostname and reverse DNS, creates the first domain and the first adm
 mailbox, and then shows the DNS records to publish for that domain with live verification.
 
 Afterwards, log in with the admin mailbox. **Admin → Domains** lets you add more domains,
-mailboxes and aliases at any time; each domain has its own DNS guide.
+mailboxes and aliases at any time; each domain has its own DNS guide. A mailbox can be made
+send-only (turn off **Receives mail**) for addresses like `noreply@`: it can still sign in and
+send, but mail addressed to it is rejected during the SMTP conversation.
 
 ### The admin area
 
@@ -52,6 +54,21 @@ mailboxes and aliases at any time; each domain has its own DNS guide.
 
 Sign-in attempts and the mail log are kept for `ACTIVITY_RETENTION_DAYS` (90 by default).
 Postfix logs each message's Subject so the mail log can show it.
+
+### Locked out of the admin area
+
+The app container has a small recovery CLI that works directly on the database, no sign-in needed:
+
+```bash
+docker compose exec app node dist/cli.js users                          # list mailboxes and admins
+docker compose exec app node dist/cli.js passwd admin@example.com       # prompts for a new password
+docker compose exec app node dist/cli.js passwd admin@example.com --generate
+docker compose exec app node dist/cli.js logout admin@example.com       # or: logout --all
+docker compose exec app node dist/cli.js unlock                         # list lockouts; unlock <email|ip> clears one
+```
+
+`passwd` also clears that account's sign-in lockout and signs it out of every web session.
+Changes made this way appear in the audit log as "system".
 
 ### Optional antivirus
 

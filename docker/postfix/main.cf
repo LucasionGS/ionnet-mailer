@@ -38,6 +38,9 @@ virtual_mailbox_domains = proxy:pgsql:/etc/postfix/sql/domains.cf
 virtual_mailbox_maps = proxy:pgsql:/etc/postfix/sql/mailboxes.cf
 virtual_alias_maps = proxy:pgsql:/etc/postfix/sql/aliases.cf
 virtual_transport = lmtp:inet:dovecot:24
+# Rejects mail for send-only mailboxes; first in every listener's recipient restrictions
+# (master.cf too) so neither local senders nor the web app can deliver to them.
+send_only_recipients = check_recipient_access proxy:pgsql:/etc/postfix/sql/recipient-access.cf
 lmtp_tls_security_level = none
 
 # ---- SASL via Dovecot -------------------------------------------------------
@@ -94,6 +97,7 @@ smtpd_relay_restrictions =
     permit_sasl_authenticated,
     reject_unauth_destination
 smtpd_recipient_restrictions =
+    $send_only_recipients,
     permit_mynetworks,
     permit_sasl_authenticated,
     reject_non_fqdn_recipient,

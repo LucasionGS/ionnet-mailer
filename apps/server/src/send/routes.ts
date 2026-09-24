@@ -92,8 +92,11 @@ sendRoutes.post("/send", async (c) => {
   const { raw, messageId, envelope } = await buildMime({ req, from, domain: user.email.split("@")[1]!, uploads, forwarded, original });
 
   const transport = nodemailer.createTransport({ host: config.SMTP_HOST, port: config.SMTP_PORT, secure: false, ignoreTLS: true, name: config.MAIL_HOSTNAME });
+  // Postfix turns individual recipients away (send-only mailboxes); the rest still get the message.
+  let rejected: string[];
   try {
-    await transport.sendMail({ envelope, raw });
+    const info = await transport.sendMail({ envelope, raw });
+    rejected = info.rejected ?? [];
   } catch (err) {
     log.error(`SMTP submission failed for ${user.email}`, err);
     throw badRequest(`Could not hand the message to the mail server: ${(err as Error).message}`);
@@ -122,7 +125,7 @@ sendRoutes.post("/send", async (c) => {
     }
   });
   await rememberRecipients(user, [...req.to, ...req.cc, ...req.bcc]).catch((err) => log.warn("could not record recipients", err));
-  return c.json({ ok: true, messageId });
+  return c.json({ ok: true, messageId, rejected });
 });
 
 sendRoutes.put("/drafts", async (c) => {

@@ -27,6 +27,7 @@ import { cachedDomainDns } from "../dns/check.ts";
 import { syncSelectorMap } from "./dkim.ts";
 import {
   afterDomainCommit,
+  assertReceivingDestination,
   createAlias,
   createDomain,
   createMailbox,
@@ -173,6 +174,7 @@ adminRoutes.patch("/aliases/:id", async (c) => {
   const a = await AliasRow.findByPk(c.req.param("id"));
   if (!a) throw notFound("Alias not found");
   const body = await parseJson(c, AliasUpdateSchema);
+  if (body.destination !== undefined && body.destination !== a.destination) await assertReceivingDestination(body.destination);
   if (body.destination !== undefined) a.destination = body.destination;
   if (body.active !== undefined) a.active = body.active;
   await a.save();

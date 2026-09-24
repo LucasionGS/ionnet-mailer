@@ -40,8 +40,12 @@ export function queueSend(qc: QueryClient, payload: SendRequest, files: File[], 
     updateToast(toastId, { title: "Sending…" });
     const onProgress = files.length ? (f: number) => updateToast(toastId, { title: f < 1 ? `Sending… ${Math.round(f * 100)}%` : "Sending…" }) : undefined;
     try {
-      await sendMail(payload, files, onProgress);
-      updateToast(toastId, { kind: "success", title: "Message sent", duration: 3000 });
+      const { rejected } = await sendMail(payload, files, onProgress);
+      if (rejected?.length) {
+        updateToast(toastId, { kind: "error", title: "Message sent, but not to everyone", description: `Not accepted by the server: ${rejected.join(", ")}`, duration: 15000 });
+      } else {
+        updateToast(toastId, { kind: "success", title: "Message sent", duration: 3000 });
+      }
       invalidateMail(qc);
     } catch (err) {
       dismiss(toastId);

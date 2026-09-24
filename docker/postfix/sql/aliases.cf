@@ -3,6 +3,9 @@ user = mailreader
 password = @@MAIL_DB_PASSWORD@@
 dbname = @@POSTGRES_DB@@
 # Aliases plus an identity self-map for real mailboxes so a catch-all
-# ("@domain" source) never captures mail for existing mailboxes.
+# ("@domain" source) never captures mail for existing mailboxes (send-only ones
+# included: recipient-access.cf rejects those). Alias destinations that are
+# send-only mailboxes are skipped so the alias still reaches its other targets.
 query = SELECT destination FROM aliases WHERE source = '%s' AND active
+          AND destination NOT IN (SELECT email FROM mailboxes WHERE active AND NOT receive_mail)
         UNION SELECT email FROM mailboxes WHERE email = '%s' AND active

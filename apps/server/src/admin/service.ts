@@ -37,6 +37,7 @@ function mailboxDto(m: MailboxRow, usedBytes: number | null): Mailbox {
     usedBytes,
     isAdmin: m.isAdmin,
     active: m.active,
+    receiveMail: m.receiveMail,
     createdAt: m.createdAt.toISOString(),
   };
 }
@@ -98,13 +99,25 @@ export async function deleteDomain(domain: Domain): Promise<void> {
   await removeDomainKey(domain);
 }
 
+/** Postfix skips send-only mailboxes as alias targets, so pointing an alias at one would lose the mail. */
+export async function assertReceivingDestination(destination: string): Promise<void> {
+  if (await MailboxRow.findOne({ where: { email: destination, receiveMail: false } })) {
+    throw badRequest(`${destination} is a send-only mailbox and does not receive mail`);
+  }
+}
+
 export async function setCatchAll(domain: Domain, destination: string | null): Promise<void> {
   const source = `@${domain.name}`;
+  if (destination) await assertReceivingDestination(destination);
   await AliasRow.destroy({ where: { domainId: domain.id, source } });
   if (destination) await AliasRow.create({ domainId: domain.id, source, destination });
 }
 
-export async function createMailbox(domain: Domain, input: MailboxCreate, tx?: Transaction): Promise<MailboxRow> {
+export async function createMailbox(
+  domain: Domain,
+  input: Omit<MailboxCreate, "receiveMail"> & { receiveMail?: boolean },
+  tx?: Transaction,
+): Promise<MailboxRow> {
   const email = `${input.localPart}@${domain.name}`;
   if (await MailboxRow.findOne({ where: { email }, transaction: tx })) throw conflict(`${email} already exists`);
   if (await AliasRow.findOne({ where: { source: email }, transaction: tx })) throw conflict(`${email} is already used by an alias`);
@@ -117,6 +130,7 @@ export async function createMailbox(domain: Domain, input: MailboxCreate, tx?: T
       displayName: input.displayName,
       quotaBytes: input.quotaBytes,
       isAdmin: input.isAdmin,
+      receiveMail: input.receiveMail ?? true,
     },
     { transaction: tx },
   );
@@ -137,6 +151,7 @@ export async function updateMailbox(m: MailboxRow, input: MailboxUpdate): Promis
   if (input.quotaBytes !== undefined) m.quotaBytes = input.quotaBytes;
   if (input.isAdmin !== undefined) m.isAdmin = input.isAdmin;
   if (input.active !== undefined) m.active = input.active;
+  if (input.receiveMail !== undefined) m.receiveMail = input.receiveMail;
   await m.save();
   return m;
 }
@@ -151,6 +166,7 @@ export async function createAlias(domain: Domain, localPart: string, destination
   if (localPart && (await MailboxRow.findOne({ where: { email: source } }))) throw conflict(`${source} is a mailbox`);
   if (source === destination) throw badRequest("An alias cannot point at itself");
   if (await AliasRow.findOne({ where: { source, destination } })) throw conflict("This alias already exists");
+  await assertReceivingDestination(destination);
   return AliasRow.create({ domainId: domain.id, source, destination });
 }
 
