@@ -11,7 +11,6 @@ export interface MessageCardProps {
   message: Message;
   expanded: boolean;
   onToggle: () => void;
-  dark: boolean;
   onReply: (m: Message) => void;
   onReplyAll: (m: Message) => void;
   onForward: (m: Message) => void;
@@ -183,10 +182,11 @@ export function MessageCard(p: MessageCardProps) {
             </div>
           )}
           <div className="pb-5 md:pl-12">
-            {m.html ? (
-              <HtmlFrame html={m.html} allowRemote={showRemote} dark={p.dark} />
-            ) : m.text ? (
-              <div className="plain-body text-sm leading-relaxed">{m.text}</div>
+            {m.html || m.text ? (
+              // A white page in every theme: senders design their mail for one, and dark text on it stays readable.
+              <div className="rounded-lg bg-white text-[#16181d] dark:px-5 dark:py-4">
+                {m.html ? <HtmlFrame html={m.html} allowRemote={showRemote} /> : <div className="plain-body text-sm leading-relaxed">{m.text}</div>}
+              </div>
             ) : (
               <div className="text-sm text-fg-faint italic">This message has no content.</div>
             )}

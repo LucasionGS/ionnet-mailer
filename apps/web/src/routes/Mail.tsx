@@ -10,7 +10,6 @@ import { ThreadList } from "@/features/mail/ThreadList";
 import { ThreadView } from "@/features/mail/ThreadView";
 import { useMailActions } from "@/features/mail/useMailActions";
 import { openComposer } from "@/features/mail/composerStore";
-import { useIsDark } from "@/lib/theme";
 import { setPrefs, usePrefs } from "@/lib/prefs";
 import { SEARCH_INPUT_ID, setDrawerOpen, useDrawerOpen } from "@/lib/ui";
 
@@ -31,7 +30,6 @@ export function MailPage() {
   const { data: folders } = useFolders();
   const threads = useThreads(folder, q);
   const actions = useMailActions();
-  const dark = useIsDark();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | undefined>(threadId);
@@ -367,7 +365,7 @@ export function MailPage() {
         <section className={cn("min-w-0 flex-1", !showThreadPane && "max-md:hidden")}>
           {threadId && me ? (
             <ThreadShortcutBridge>
-              <ThreadView key={threadId} folder={folder} threadId={threadId} me={me} dark={dark} onBack={closeThread} onClosed={closeThread} />
+              <ThreadView key={threadId} folder={folder} threadId={threadId} me={me} onBack={closeThread} onClosed={closeThread} />
             </ThreadShortcutBridge>
           ) : (
             <div className="hidden h-full md:block">

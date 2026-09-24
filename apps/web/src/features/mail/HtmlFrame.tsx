@@ -46,35 +46,31 @@ export function htmlHasRemoteContent(html: string): boolean {
   return /(src|srcset|background)\s*=\s*["']?\s*(https?:)?\/\//i.test(html) || /url\s*\(\s*['"]?\s*(https?:)?\/\//i.test(html);
 }
 
+/** Mail is written for a white page, so it is always shown light, whatever the app theme. */
 const FRAME_CSS = `
-  :root { color-scheme: light dark; }
+  :root { color-scheme: light; }
   html, body { margin: 0; padding: 0; }
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    font-size: 14px; line-height: 1.5; color: __FG__; background: transparent;
+    font-size: 14px; line-height: 1.5; color: #16181d; background: transparent;
     word-wrap: break-word; overflow-wrap: anywhere;
   }
   img { max-width: 100%; height: auto; }
-  img[data-remote-blocked] { min-width: 16px; min-height: 16px; background: __PH__; border: 1px dashed __BORDER__; }
-  blockquote { border-left: 3px solid __BORDER__; margin: 0.5em 0; padding-left: 0.75em; color: __MUTED__; }
-  a { color: __ACCENT__; }
+  img[data-remote-blocked] { min-width: 16px; min-height: 16px; background: #e7e9ec; border: 1px dashed #c9cdd4; }
+  blockquote { border-left: 3px solid #c9cdd4; margin: 0.5em 0; padding-left: 0.75em; color: #5b6270; }
+  a { color: #2563eb; }
   pre { white-space: pre-wrap; }
   table { max-width: 100%; }
 `;
 
-export function HtmlFrame({ html, allowRemote, dark }: { html: string; allowRemote: boolean; dark: boolean }) {
+export function HtmlFrame({ html, allowRemote }: { html: string; allowRemote: boolean }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(120);
 
   const doc = useMemo(() => {
     const body = sanitizeEmailHtml(html, allowRemote);
-    const css = FRAME_CSS.replace("__FG__", dark ? "#e8eaee" : "#16181d")
-      .replace("__MUTED__", dark ? "#a0a6b1" : "#5b6270")
-      .replaceAll("__BORDER__", dark ? "#3a404b" : "#c9cdd4")
-      .replace("__ACCENT__", dark ? "#60a5fa" : "#2563eb")
-      .replace("__PH__", dark ? "#262b34" : "#e7e9ec");
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${css}</style></head><body>${body}</body></html>`;
-  }, [html, allowRemote, dark]);
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${FRAME_CSS}</style></head><body>${body}</body></html>`;
+  }, [html, allowRemote]);
 
   useEffect(() => {
     const el = ref.current;

@@ -15,14 +15,12 @@ export function ThreadView({
   folder,
   threadId,
   me,
-  dark,
   onBack,
   onClosed,
 }: {
   folder: string;
   threadId: string;
   me: Me;
-  dark: boolean;
   onBack?: () => void;
   onClosed: () => void;
 }) {
@@ -178,7 +176,6 @@ export function ThreadView({
                 message={m}
                 expanded={expanded.has(m.uid)}
                 onToggle={() => toggle(m.uid)}
-                dark={dark}
                 onReply={onReply}
                 onReplyAll={onReplyAll}
                 onForward={onForward}

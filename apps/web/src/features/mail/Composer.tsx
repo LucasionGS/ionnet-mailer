@@ -439,7 +439,7 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
           </label>
           {signature && (
             <div className="scroll-thin mt-2 max-h-28 overflow-y-auto rounded-md border bg-white px-2">
-              <HtmlFrame html={withSignature("", signature)} allowRemote dark={false} />
+              <HtmlFrame html={withSignature("", signature)} allowRemote />
             </div>
           )}
         </div>
