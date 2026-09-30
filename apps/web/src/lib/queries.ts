@@ -182,6 +182,17 @@ export function useUpdateProfile() {
     onSuccess: (me) => qc.setQueryData(qk.me, me),
   });
 }
+/** Add (`allow: true`) or remove a sender from the remote content allowlist: an address or a domain. */
+export function useRemoteContentAllow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sender, allow }: { sender: string; allow: boolean }) => {
+      const path = `/api/account/remote-content/${encodeURIComponent(sender)}`;
+      return allow ? api.put<Me>(path) : api.del<Me>(path);
+    },
+    onSuccess: (me) => qc.setQueryData(qk.me, me),
+  });
+}
 export function useChangePassword() {
   return useMutation({ mutationFn: (body: PasswordChange) => api.post<Ok>("/api/account/password", body) });
 }

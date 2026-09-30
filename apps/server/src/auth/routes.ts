@@ -27,6 +27,7 @@ export async function toMe(user: MailboxRow): Promise<Me> {
     signature: user.signature ?? null,
     quotaBytes: Number(user.quotaBytes),
     sendAs,
+    remoteContentAllow: user.remoteContentAllow ?? [],
   };
 }
 

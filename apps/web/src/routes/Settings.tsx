@@ -1,13 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Check, Monitor, Moon, Sun } from "lucide-react";
-import { formatBytes } from "@ionnet/shared";
-import { useChangePassword, useMe, useQuota, useUpdateProfile } from "@/lib/queries";
+import { Check, Monitor, Moon, Sun, X } from "lucide-react";
+import { RemoteContentSenderSchema, formatBytes } from "@ionnet/shared";
+import { useChangePassword, useMe, useQuota, useRemoteContentAllow, useUpdateProfile } from "@/lib/queries";
 import { ACCENTS, useAccent, useIsDark, useTheme, type AccentName, type ThemeSetting } from "@/lib/theme";
 import { setPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { cn, passwordStrength } from "@/lib/utils";
-import { Button, Field, Input, Textarea } from "@/components/ui";
+import { Button, Field, IconButton, Input, Textarea } from "@/components/ui";
 
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -34,6 +34,8 @@ export function SettingsPage() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  const remoteAllow = useRemoteContentAllow();
+  const [newSender, setNewSender] = useState("");
 
   useEffect(() => {
     if (me) {
@@ -66,6 +68,29 @@ export function SettingsPage() {
       setConfirm("");
     } catch (err) {
       toast.error("Could not change password", errorMessage(err));
+    }
+  };
+
+  const addSender = async (e: FormEvent) => {
+    e.preventDefault();
+    const parsed = RemoteContentSenderSchema.safeParse(newSender);
+    if (!parsed.success) {
+      toast.error("Enter an email address or a domain");
+      return;
+    }
+    try {
+      await remoteAllow.mutateAsync({ sender: parsed.data, allow: true });
+      setNewSender("");
+    } catch (err) {
+      toast.error("Could not save", errorMessage(err));
+    }
+  };
+
+  const removeSender = async (sender: string) => {
+    try {
+      await remoteAllow.mutateAsync({ sender, allow: false });
+    } catch (err) {
+      toast.error("Could not remove", errorMessage(err));
     }
   };
 
@@ -209,6 +234,32 @@ export function SettingsPage() {
               ))}
             </div>
           </Field>
+        </Section>
+
+        <Section
+          title="Remote images"
+          description="Images from these senders load without asking. A domain covers its subdomains too. Mail that fails sender authentication always asks."
+        >
+          <div className="flex flex-col gap-3">
+            {me && me.remoteContentAllow.length > 0 && (
+              <ul className="flex flex-col divide-y rounded-lg border">
+                {[...me.remoteContentAllow].sort().map((sender) => (
+                  <li key={sender} className="flex items-center justify-between gap-2 py-1 pr-1 pl-3 text-sm">
+                    <span className="min-w-0 truncate">{sender.includes("@") ? sender : `Anyone at ${sender}`}</span>
+                    <IconButton label={`Remove ${sender}`} size="sm" onClick={() => removeSender(sender)}>
+                      <X size={14} />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form onSubmit={addSender} className="flex gap-2">
+              <Input value={newSender} onChange={(e) => setNewSender(e.target.value)} placeholder="name@example.com or example.com" maxLength={254} className="flex-1" />
+              <Button type="submit" loading={remoteAllow.isPending} disabled={!newSender.trim()}>
+                Add
+              </Button>
+            </form>
+          </div>
         </Section>
 
         <Section title="Storage">

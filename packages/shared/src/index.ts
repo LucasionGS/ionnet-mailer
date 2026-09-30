@@ -24,6 +24,8 @@
  *  Account (self-service)
  *   PATCH /api/account/profile                  ProfileUpdate -> Me
  *   POST  /api/account/password                 PasswordChange -> { ok }
+ *   PUT    /api/account/remote-content/:sender  -> Me   (sender: an address or a domain, URL-encoded)
+ *   DELETE /api/account/remote-content/:sender  -> Me
  *
  *  Admin (requires Me.isAdmin)
  *   GET    /api/admin/domains                   -> Domain[]
@@ -148,6 +150,8 @@ export const MeSchema = z.object({
   quotaBytes: z.number(),
   /** addresses this user may send from: their own first, then aliases that deliver to them */
   sendAs: z.array(z.string()).default([]),
+  /** senders whose remote images load without asking: full addresses, or domains (which cover their subdomains too) */
+  remoteContentAllow: z.array(z.string()).default([]),
 });
 export type Me = z.infer<typeof MeSchema>;
 
@@ -184,6 +188,17 @@ export const ProfileUpdateSchema = z.object({
   signature: z.string().max(5000).nullable().optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
+
+/** An entry in `Me.remoteContentAllow`: `someone@example.com` or `example.com`. */
+export const RemoteContentSenderSchema = z.union([EmailSchema, DomainNameSchema]);
+
+/** Whether remote content from `address` is allowed by `allow` (see `Me.remoteContentAllow`). */
+export function remoteContentAllowed(allow: readonly string[], address: string | null | undefined): boolean {
+  if (!address) return false;
+  const addr = address.trim().toLowerCase();
+  const domain = addr.slice(addr.lastIndexOf("@") + 1);
+  return allow.some((e) => e === addr || (!e.includes("@") && (domain === e || domain.endsWith(`.${e}`))));
+}
 
 export const PasswordChangeSchema = z.object({
   currentPassword: z.string().min(1).max(72),

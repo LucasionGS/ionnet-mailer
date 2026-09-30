@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { ChevronDown, Download, FileText, Forward, Image as ImageIcon, MoreHorizontal, Paperclip, Reply, ReplyAll, ShieldCheck, ShieldX, Star, Trash2 } from "lucide-react";
 import type { Message } from "@ionnet/shared";
-import { formatBytes } from "@ionnet/shared";
-import { attachmentUrl, rawMessageUrl } from "@/lib/api";
+import { formatBytes, remoteContentAllowed } from "@ionnet/shared";
+import { attachmentUrl, errorMessage, rawMessageUrl } from "@/lib/api";
+import { useMe, useRemoteContentAllow } from "@/lib/queries";
+import { toast } from "@/lib/toast";
 import { avatarColor, cn, displayAddress, formatDateLong, formatDateShort, initials } from "@/lib/utils";
 import { Badge, IconButton, Menu, MenuItem, MenuSeparator, Tooltip } from "@/components/ui";
 import { HtmlFrame } from "./HtmlFrame";
@@ -65,6 +67,27 @@ export function MessageCard(p: MessageCardProps) {
   const auth = m.authentication;
   const authOk = [auth.spf, auth.dkim, auth.dmarc].some((v) => v?.toLowerCase().startsWith("pass"));
   const authBad = [auth.spf, auth.dkim, auth.dmarc].some((v) => v && /^(fail|softfail|permerror)/i.test(v));
+  const { data: me } = useMe();
+  const remoteAllow = useRemoteContentAllow();
+  const senderAddress = from?.address.toLowerCase() ?? "";
+  const senderDomain = senderAddress.includes("@") ? senderAddress.slice(senderAddress.lastIndexOf("@") + 1) : "";
+  const senderAllowed = remoteContentAllowed(me?.remoteContentAllow ?? [], senderAddress);
+  // A From header is trivial to forge, so the allowlist only applies to mail that didn't fail authentication.
+  const allowRemote = showRemote || (senderAllowed && !authBad);
+
+  const allowSender = async (sender: string) => {
+    setShowRemote(true);
+    try {
+      await remoteAllow.mutateAsync({ sender, allow: true });
+      toast({
+        kind: "success",
+        title: `Images from ${sender} will always be shown`,
+        action: { label: "Undo", onClick: () => remoteAllow.mutate({ sender, allow: false }) },
+      });
+    } catch (err) {
+      toast.error("Could not save", errorMessage(err));
+    }
+  };
 
   return (
     <article>
@@ -172,20 +195,32 @@ export function MessageCard(p: MessageCardProps) {
 
       {p.expanded && (
         <div className="animate-fade-in">
-          {m.hasRemoteContent && !showRemote && (
-            <div className="mb-3 ml-12 flex flex-wrap items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-xs text-fg-muted max-md:ml-0">
-              <ImageIcon size={13} />
-              Remote images are hidden to protect your privacy.
+          {m.hasRemoteContent && !allowRemote && (
+            <div className="mb-3 ml-12 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-surface-2 px-3 py-1.5 text-xs text-fg-muted max-md:ml-0">
+              <span className="flex items-center gap-2">
+                <ImageIcon size={13} />
+                {senderAllowed ? "Remote images are hidden because this message failed sender authentication." : "Remote images are hidden to protect your privacy."}
+              </span>
               <button type="button" className="font-medium text-accent hover:underline" onClick={() => setShowRemote(true)}>
                 Show images
               </button>
+              {!senderAllowed && senderDomain && (
+                <>
+                  <button type="button" className="font-medium text-accent hover:underline" disabled={remoteAllow.isPending} onClick={() => allowSender(senderAddress)}>
+                    Allow from {senderAddress}
+                  </button>
+                  <button type="button" className="font-medium text-accent hover:underline" disabled={remoteAllow.isPending} onClick={() => allowSender(senderDomain)}>
+                    Allow from all of {senderDomain}
+                  </button>
+                </>
+              )}
             </div>
           )}
           <div className="pb-5 md:pl-12">
             {m.html || m.text ? (
               // A white page in every theme: senders design their mail for one, and dark text on it stays readable.
               <div className="rounded-lg bg-white text-[#16181d] dark:px-5 dark:py-4">
-                {m.html ? <HtmlFrame html={m.html} allowRemote={showRemote} /> : <div className="plain-body text-sm leading-relaxed">{m.text}</div>}
+                {m.html ? <HtmlFrame html={m.html} allowRemote={allowRemote} /> : <div className="plain-body text-sm leading-relaxed">{m.text}</div>}
               </div>
             ) : (
               <div className="text-sm text-fg-faint italic">This message has no content.</div>

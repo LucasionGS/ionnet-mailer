@@ -41,6 +41,7 @@ export class MailboxRow extends Model<InferAttributes<MailboxRow>, InferCreation
   declare isAdmin: CreationOptional<boolean>;
   declare active: CreationOptional<boolean>;
   declare receiveMail: CreationOptional<boolean>;
+  declare remoteContentAllow: CreationOptional<string[]>;
   declare createdAt: CreationOptional<Date>;
 }
 MailboxRow.init(
@@ -63,6 +64,7 @@ MailboxRow.init(
     isAdmin: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     receiveMail: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    remoteContentAllow: { type: DataTypes.ARRAY(DataTypes.STRING(254)), allowNull: false, defaultValue: [] },
     createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   },
   { sequelize, tableName: "mailboxes" },
