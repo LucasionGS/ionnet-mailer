@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
-import type { FetchMessageObject, ImapFlow, MessageStructureObject } from "imapflow";
+import type { FetchMessageObject, ImapFlow, MessageStructureObject, SearchObject } from "imapflow";
 import type { Address, ThreadList, ThreadSummary } from "@ionnet/shared";
 import { badRequest } from "../errors.ts";
 
 const PAGE = 50;
+/** Unlinked messages sharing subject and sender are only merged when sent at most this far apart. */
+const SUBJECT_FALLBACK_GAP_MS = 14 * 24 * 60 * 60 * 1000;
+/** Upper bound on search rounds when collecting a thread, so a pathological reference graph can't loop forever. */
+const MAX_EXPAND_ROUNDS = 8;
+/** Max ids/subjects per IMAP SEARCH, keeps the OR tree a reasonable size. */
+const SEARCH_CHUNK = 25;
 
 const normalizeSubject = (s: string | undefined) =>
   (s ?? "")
@@ -76,6 +82,16 @@ function parseReferencesHeader(headers: Buffer | undefined): string[] {
   return line ? (line.match(/<[^>]+>/g) ?? []) : [];
 }
 
+const isLinked = (e: Envelope) => e.references.length > 0 || !!e.inReplyTo;
+
+/** Key used by the subject fallback, or null when the message is id-linked or has no subject. */
+function subjectKey(e: Envelope): string | null {
+  if (isLinked(e)) return null;
+  const s = normalizeSubject(e.subject);
+  if (!s) return null;
+  return `${s}\n${e.from?.address.toLowerCase() ?? ""}`;
+}
+
 /** Groups envelopes into threads using Message-ID / References / In-Reply-To, then subject as a fallback. */
 export function groupThreads(envs: Envelope[], folder: string): ThreadSummary[] {
   const parent = new Map<string, string>();
@@ -97,16 +113,14 @@ export function groupThreads(envs: Envelope[], folder: string): ThreadSummary[] 
       union(e.messageId, ref);
     }
   }
-  // Subject fallback: messages with identical normalized subject and no id links.
-  const bySubject = new Map<string, string>();
-  for (const e of envs) {
-    const s = normalizeSubject(e.subject);
-    if (!s) continue;
-    const linked = e.references.length > 0 || !!e.inReplyTo;
-    if (linked) continue;
-    const other = bySubject.get(s);
-    if (other) union(e.messageId, other);
-    else bySubject.set(s, e.messageId);
+  // Subject fallback: messages with no id links, the same normalized subject and sender, sent close together.
+  const lastBySubject = new Map<string, Envelope>();
+  for (const e of [...envs].sort((a, b) => a.date.getTime() - b.date.getTime())) {
+    const key = subjectKey(e);
+    if (!key) continue;
+    const prev = lastBySubject.get(key);
+    if (prev && e.date.getTime() - prev.date.getTime() <= SUBJECT_FALLBACK_GAP_MS) union(e.messageId, prev.messageId);
+    lastBySubject.set(key, e);
   }
   const groups = new Map<string, Envelope[]>();
   for (const e of envs) {
@@ -209,7 +223,7 @@ function snippetFromPart(node: MessageStructureObject, raw: Buffer | undefined):
   return text.replace(/\s+/g, " ").trim().slice(0, 140);
 }
 
-export async function fetchEnvelopes(client: ImapFlow, uids: number[]): Promise<Envelope[]> {
+export async function fetchEnvelopes(client: ImapFlow, uids: number[], opts: { snippets?: boolean } = {}): Promise<Envelope[]> {
   if (!uids.length) return [];
   const out = new Map<number, Envelope>();
   const leaves = new Map<number, { key: string; node: MessageStructureObject }>();
@@ -222,6 +236,7 @@ export async function fetchEnvelopes(client: ImapFlow, uids: number[]): Promise<
     const leaf = textLeaf(m.bodyStructure);
     if (leaf) leaves.set(m.uid, leaf);
   }
+  if (opts.snippets === false) return uids.map((u) => out.get(u)).filter((e): e is Envelope => !!e);
   // Second pass: fetch a truncated copy of each message's text leaf, grouped by part id.
   const byKey = new Map<string, number[]>();
   for (const [uid, leaf] of leaves) byKey.set(leaf.key, [...(byKey.get(leaf.key) ?? []), uid]);
@@ -258,22 +273,70 @@ export async function listThreads(
   }
 }
 
-/** UIDs of all messages in `folder` belonging to the thread rooted at `rootMessageId`. */
+function chunk<T>(list: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+/**
+ * UIDs of all messages in `folder` belonging to the thread rooted at `rootMessageId`.
+ * Mirrors `groupThreads`: follows Message-ID / References / In-Reply-To links transitively and
+ * applies the same subject fallback, so opening a thread shows every message the list grouped into it.
+ */
 export async function threadUids(client: ImapFlow, folder: string, rootMessageId: string): Promise<number[]> {
   const lock = await client.getMailboxLock(folder);
   try {
-    const found = await client.search(
-      {
-        or: [
-          { header: { "message-id": rootMessageId } },
-          { header: { references: rootMessageId } },
-          { header: { "in-reply-to": rootMessageId } },
-        ],
-      },
-      { uid: true },
-    );
-    return (found || []).sort((a, b) => a - b);
+    const known = new Map<number, Envelope>();
+    const searchedIds = new Set<string>();
+    const searchedSubjects = new Set<string>();
+    let ids = [rootMessageId];
+    let subjects: string[] = [];
+    for (let round = 0; round < MAX_EXPAND_ROUNDS && (ids.length || subjects.length); round++) {
+      ids.forEach((id) => searchedIds.add(id));
+      subjects.forEach((s) => searchedSubjects.add(s));
+      const found = new Set<number>();
+      for (const group of chunk(ids, SEARCH_CHUNK)) {
+        const or = group.flatMap((id): SearchObject[] => [
+          { header: { "message-id": id } },
+          { header: { references: id } },
+          { header: { "in-reply-to": id } },
+        ]);
+        for (const uid of (await client.search({ or }, { uid: true })) || []) found.add(uid);
+      }
+      for (const group of chunk(subjects, SEARCH_CHUNK)) {
+        const or = group.map((subject) => ({ subject }));
+        for (const uid of (await client.search({ or }, { uid: true })) || []) found.add(uid);
+      }
+      const fresh = [...found].filter((u) => !known.has(u)).sort((a, b) => a - b);
+      const envs = await fetchEnvelopes(client, fresh, { snippets: false });
+      envs.forEach((e) => known.set(e.uid, e));
+      // Subject searches are loose substring matches; only messages that actually join the thread add new search terms.
+      const members = new Set(threadOf([...known.values()], folder, rootMessageId));
+      const nextIds = new Set<string>();
+      const nextSubjects = new Set<string>();
+      for (const e of known.values()) {
+        if (!members.has(e.uid)) continue;
+        for (const id of [e.messageId, e.inReplyTo, ...e.references]) if (id && !searchedIds.has(id)) nextIds.add(id);
+        const s = subjectKey(e) ? normalizeSubject(e.subject) : "";
+        if (s && !searchedSubjects.has(s)) nextSubjects.add(s);
+      }
+      ids = [...nextIds];
+      subjects = [...nextSubjects];
+    }
+    return threadOf([...known.values()], folder, rootMessageId).sort((a, b) => a - b);
   } finally {
     lock.release();
   }
+}
+
+/** UIDs of the group in `envs` that contains (or references) `rootMessageId`. */
+function threadOf(envs: Envelope[], folder: string, rootMessageId: string): number[] {
+  const seeds = new Set(
+    envs
+      .filter((e) => e.messageId === rootMessageId || e.inReplyTo === rootMessageId || e.references.includes(rootMessageId))
+      .map((e) => e.uid),
+  );
+  const thread = groupThreads(envs, folder).find((t) => t.uids.some((u) => seeds.has(u)));
+  return thread?.uids ?? [];
 }
