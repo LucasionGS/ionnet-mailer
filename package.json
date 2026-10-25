@@ -1,7 +1,7 @@
 {
   "name": "ionnet-mailer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ionnet Mailer — self-hosted mail server with a modern web client",
   "packageManager": "pnpm@11.25.0",
   "engines": { "node": ">=26" },
