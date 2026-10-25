@@ -1,6 +1,9 @@
 # ==========================================================================
 # service type  private unpriv  chroot  wakeup  maxproc command + args
 # ==========================================================================
+# submission and smtps turn banned clients away on connect, so they never reach AUTH
+# (smtpd_delay_reject=no). Everything else needs a SASL login, which the sender and
+# relay restrictions enforce at MAIL FROM / RCPT TO.
 smtp      inet  n       -       n       -       -       smtpd
   -o syslog_name=postfix/smtp-in
 submission inet n       -       n       -       -       smtpd
@@ -8,8 +11,9 @@ submission inet n       -       n       -       -       smtpd
   -o smtpd_tls_security_level=encrypt
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_tls_auth_only=yes
-  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_helo_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_delay_reject=no
+  -o smtpd_client_restrictions=$banned_clients
+  -o smtpd_helo_restrictions=
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=$send_only_recipients,permit_sasl_authenticated,reject
@@ -19,8 +23,9 @@ smtps     inet  n       -       n       -       -       smtpd
   -o syslog_name=postfix/smtps
   -o smtpd_tls_wrappermode=yes
   -o smtpd_sasl_auth_enable=yes
-  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_helo_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_delay_reject=no
+  -o smtpd_client_restrictions=$banned_clients
+  -o smtpd_helo_restrictions=
   -o smtpd_sender_restrictions=reject_sender_login_mismatch,permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
   -o smtpd_recipient_restrictions=$send_only_recipients,permit_sasl_authenticated,reject

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { Folder, MessageRef, SpecialUse } from "@ionnet/shared";
+import type { Folder, MessageRef, MoveResult, SpecialUse } from "@ionnet/shared";
 import { useDeleteMessages, useFlagMessages, useFolders, useMoveMessages } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
@@ -32,18 +32,33 @@ export function useMailActions() {
     [flag],
   );
 
+  /** Puts moved messages back where they came from. */
+  const undo = useCallback(
+    (moved: MoveResult["moved"]) => {
+      const back = new Map<string, MessageRef[]>();
+      for (const m of moved) back.set(m.from.folder, [...(back.get(m.from.folder) ?? []), m.to]);
+      for (const [destination, messages] of back) move.mutate({ messages, destination }, { onError: onError("Could not undo") });
+    },
+    [move],
+  );
+  const doneToast = useCallback(
+    (title: string, res: MoveResult) =>
+      toast({ kind: "success", title, duration: 6000, action: res.moved.length ? { label: "Undo", onClick: () => undo(res.moved) } : undefined }),
+    [undo],
+  );
+
   const moveTo = useCallback(
     (messages: MessageRef[], destination: string, label?: string) => {
       if (!messages.length) return;
       move.mutate(
         { messages, destination },
         {
-          onSuccess: () => toast.success(`Moved to ${label ?? destination}`),
+          onSuccess: (res) => doneToast(`Moved to ${label ?? destination}`, res),
           onError: onError("Could not move"),
         },
       );
     },
-    [move],
+    [move, doneToast],
   );
 
   const archive = useCallback(
@@ -64,19 +79,23 @@ export function useMailActions() {
       del.mutate(
         { messages, permanent },
         {
-          onSuccess: () => toast.success(permanent ? "Deleted permanently" : "Moved to Trash"),
+          onSuccess: (res) => (permanent ? toast.success("Deleted permanently") : doneToast("Moved to Trash", res)),
           onError: onError("Could not delete"),
         },
       );
     },
-    [del],
+    [del, doneToast],
   );
 
   const junk = useCallback(
     (messages: MessageRef[]) => {
       const j = findSpecial(folders, "junk");
-      if (!j) return;
+      if (!j) {
+        toast.error("No Junk folder", "Create a folder named Junk to use this action.");
+        return false;
+      }
       moveTo(messages, j.path, "Junk");
+      return true;
     },
     [folders, moveTo],
   );

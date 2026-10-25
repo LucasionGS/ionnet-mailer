@@ -146,7 +146,7 @@ const adminSecurityRoute = createRoute({
   path: "/security",
   validateSearch: (s: Record<string, unknown>): SecuritySearch =>
     strip({
-      tab: s.tab === "signins" || s.tab === "lockouts" || s.tab === "sessions" || s.tab === "audit" ? s.tab : undefined,
+      tab: s.tab === "signins" || s.tab === "bans" || s.tab === "lockouts" || s.tab === "sessions" || s.tab === "audit" ? s.tab : undefined,
       q: text(s.q),
       result: s.result === "success" || s.result === "failed" ? s.result : undefined,
       source: param(AuthSourceSchema, s.source),

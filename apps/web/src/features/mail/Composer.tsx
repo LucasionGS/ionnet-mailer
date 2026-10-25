@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, CornerUpLeft, CornerUpRight, FileText, Maximize2, Minimize2, Minus, MoreHorizontal, Paperclip, PictureInPicture2, Send, Trash2, X } from "lucide-react";
-import type { DraftRequest, Me, SendRequest } from "@ionnet/shared";
+import type { DraftRequest, Folder, Me, SendRequest } from "@ionnet/shared";
 import { formatBytes } from "@ionnet/shared";
 import { errorMessage, saveDraft } from "@/lib/api";
-import { invalidateMail } from "@/lib/queries";
+import { invalidateMail, qk } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Button, Checkbox, ConfirmDialog, IconButton, Tooltip } from "@/components/ui";
-import { closeComposer, getComposer, registerComposerFlush, updateComposer, type ComposerState, type Recipient } from "./composerStore";
+import { closeComposer, getComposer, registerComposerFlush, stashComposer, updateComposer, type ComposerState, type Recipient } from "./composerStore";
 import { RecipientInput } from "./RecipientInput";
 import { EditorArea, EditorToolbar, insertImages, useMailEditor } from "./Editor";
 import { HtmlFrame } from "./HtmlFrame";
@@ -125,6 +125,7 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
     state.html,
     (html) => {
       htmlRef.current = html;
+      stashComposer({ html }, state.key);
       scheduleSave();
     },
     { onSubmit: () => sendRef.current(), onFiles: addFiles },
@@ -142,10 +143,7 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
   const latest = useRef(current);
   latest.current = current;
 
-  const snapshot = () => {
-    const c = latest.current;
-    return JSON.stringify({ ...c, html: htmlRef.current, files: c.files.map((f) => f.name + f.size) });
-  };
+  const snapshot = (c = latest.current) => JSON.stringify({ ...c, html: htmlRef.current, files: c.files.map((f) => f.name + f.size) });
 
   const isEmpty = () => {
     const c = latest.current;
@@ -165,13 +163,23 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
       fromAddress: c.fromAddress,
       inReplyTo: state.inReplyTo,
       replyMode: state.replyMode,
+      threadHeaders: state.threadHeaders,
       forwardAttachments: c.forwardAtt.map((a) => ({ ref: a.ref, partId: a.partId })),
       requestReadReceipt: false,
     };
   };
 
-  /** Resolves false when the save failed. */
-  const doSaveDraft = async (silent = true): Promise<boolean> => {
+  /**
+   * Saves run one after another: each one needs the draft UID the previous one created, or two overlapping saves
+   * (autosave plus close or send) would each create a draft. Resolves false when the save failed.
+   */
+  const saveChain = useRef<Promise<boolean>>(Promise.resolve(true));
+  const doSaveDraft = (silent = true): Promise<boolean> => {
+    const run = saveChain.current.then(() => saveNow(silent));
+    saveChain.current = run.catch(() => false);
+    return run;
+  };
+  const saveNow = async (silent: boolean): Promise<boolean> => {
     const snap = snapshot();
     if (snap === lastSaved.current || isEmpty()) return true;
     setSaving(true);
@@ -179,12 +187,20 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
       const open = getComposer();
       const draftUid = open?.key === state.key ? open.draftUid : state.draftUid;
       const body: DraftRequest = { ...(await buildPayload()), draftUid };
-      const r = await saveDraft(body, latest.current.files);
+      const sentFiles = latest.current.files;
+      const r = await saveDraft(body, sentFiles);
       updateComposer({ draftUid: r.uid }, state.key);
-      lastSaved.current = snap;
+      // The files are in the draft now: refer to the draft's copies, so the next save doesn't upload them again and
+      // still finds them after this draft replaced the previous one. Files added while saving stay as they are.
+      const changedMeanwhile = snapshot() !== snap;
+      const files = latest.current.files.filter((f) => !sentFiles.includes(f));
+      setFiles(files);
+      setForwardAtt(r.attachments);
+      lastSaved.current = changedMeanwhile ? snap : snapshot({ ...latest.current, files, forwardAtt: r.attachments });
       setSavedAt(Date.now());
       setSaveFailed(false);
-      invalidateMail(qc);
+      // Only Drafts changed; refreshing every open list on each autosave would queue behind typing.
+      invalidateMail(qc, qc.getQueryData<Folder[]>(qk.folders)?.find((f) => f.specialUse === "drafts")?.path);
       if (!silent) toast.success("Draft saved");
       return true;
     } catch (err) {
@@ -211,6 +227,7 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
       lastSaved.current = snapshot();
       return;
     }
+    stashComposer({ to, cc, bcc, subject, files, forwardAttachments: forwardAtt, signature: includeSignature, fromAddress, quote }, state.key);
     scheduleSave();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [to, cc, bcc, subject, signature, files, forwardAtt, fromAddress, quote]);
@@ -266,6 +283,8 @@ export function Composer({ state, me, variant }: { state: ComposerState; me: Me;
     setSending(true);
     if (timer.current) clearTimeout(timer.current);
     try {
+      // A save still in flight may be creating the draft this send has to replace.
+      await saveChain.current;
       const open = getComposer();
       const body: SendRequest = { ...(await buildPayload()), draftUid: open?.key === state.key ? open.draftUid : state.draftUid };
       if (body.html.length > MAX_HTML) {

@@ -5,7 +5,7 @@ export type RecordSpec = Omit<DnsRecord, "status" | "found"> & {
   /** Value used for comparison against DNS answers (defaults to `value`). */
   expect: string;
   /** Comparison mode. */
-  match: "exact" | "contains" | "mx" | "srv" | "any";
+  match: "exact" | "contains" | "mx" | "srv" | "dkim" | "any";
 };
 
 const TTL = 3600;
@@ -79,7 +79,7 @@ export function buildRecordSpecs(domain: Domain, hostname: string, publicIp: str
       value: splitTxt(dkimValue),
       ttl: TTL,
       expect: dkimValue,
-      match: "exact",
+      match: "dkim",
       hint: "Long TXT values are entered as several quoted strings; most DNS providers accept the single long value as-is.",
     },
     {

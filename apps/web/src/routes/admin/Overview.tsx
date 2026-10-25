@@ -4,7 +4,7 @@ import type { Overview, OverviewAlert, OverviewRange } from "@ionnet/shared";
 import { formatBytes } from "@ionnet/shared";
 import { useOverview } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import { Button, ErrorState, PageSpinner } from "@/components/ui";
+import { Badge, Button, ErrorState, PageSpinner } from "@/components/ui";
 import { Card, Meter, Segmented, StatTile, formatCount, formatDuration, fullTime, timeAgo, useNow } from "@/features/admin/kit";
 import { ChartLegend, ColumnChart, type ChartSeries } from "@/features/admin/ColumnChart";
 import { describeAudit } from "@/features/admin/audit";
@@ -173,6 +173,7 @@ function SignIns({ data }: { data: Overview }) {
                 >
                   <span className="w-32 shrink-0 truncate font-mono text-xs">{ip.ip}</span>
                   <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">{ip.usernames.join(", ") || "no username"}</span>
+                  {ip.banned && <Badge tone="warning">Banned</Badge>}
                   <span className="shrink-0 text-xs text-fg-faint uppercase">{ip.sources.join(" ")}</span>
                   <span className="w-12 shrink-0 text-right font-semibold tabular-nums">{formatCount(ip.failures)}</span>
                 </Link>

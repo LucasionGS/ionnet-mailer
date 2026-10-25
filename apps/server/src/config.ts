@@ -36,6 +36,24 @@ const schema = z.object({
   INTERNAL_PORT: z.coerce.number().int().default(3001),
   // Sign-in attempts, mail log and audit entries older than this are deleted.
   ACTIVITY_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
+  // The compose network; its addresses (the app, Caddy, Docker's port proxy) are never banned.
+  MAIL_NETWORK_SUBNET: z.string().default("172.28.0.0/24"),
+  // Automatic IP bans for password guessing (web, IMAP, POP3, SMTP AUTH, ManageSieve). See auth/bans.ts.
+  AUTOBAN_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v !== "0" && v !== "false"),
+  AUTOBAN_WINDOW_MINUTES: z.coerce.number().int().min(1).default(60),
+  AUTOBAN_DISTINCT_ACCOUNTS: z.coerce.number().int().min(2).default(3),
+  AUTOBAN_FAILURES: z.coerce.number().int().min(3).default(20),
+  AUTOBAN_DURATION_HOURS: z.coerce.number().min(0.1).default(24),
+  // Slow, distributed guessing: failures for accounts that don't exist, counted over a longer window (0 = off).
+  AUTOBAN_SLOW_WINDOW_HOURS: z.coerce.number().int().min(1).default(24),
+  AUTOBAN_UNKNOWN_FAILURES: z.coerce.number().int().min(0).default(3),
+  // This many addresses in one /24 (IPv6: /64) trying accounts that don't exist bans the whole network (0 = off).
+  AUTOBAN_NETWORK_ADDRESSES: z.coerce.number().int().min(0).default(5),
+  // Comma-separated addresses/networks that are never banned automatically (the compose network always is).
+  AUTOBAN_ALLOWLIST: z.string().default(""),
 });
 
 const parsed = schema.safeParse(process.env);

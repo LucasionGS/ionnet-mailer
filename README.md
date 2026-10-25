@@ -48,12 +48,31 @@ send, but mail addressed to it is rejected during the SMTP conversation.
   deferred, bounced or rejected, searchable by address, subject, queue ID or IP), the mail
   queue with retry, hold and delete, and rspamd's recent spam verdicts with their rules.
 - **Security**: every sign-in attempt (web app, and IMAP, POP3, SMTP and ManageSieve via
-  Dovecot), web lockouts, signed-in web sessions you can sign out, and an audit log of
-  changes made in the admin area.
+  Dovecot), banned addresses, web lockouts, signed-in web sessions you can sign out, and an
+  audit log of changes made in the admin area.
 - **Server logs**: live Postfix, Dovecot and app logs with level and text filters.
 
 Sign-in attempts and the mail log are kept for `ACTIVITY_RETENTION_DAYS` (90 by default).
 Postfix logs each message's Subject so the mail log can show it.
+
+### Banning password guessers
+
+An address that fails to sign in for 3 different accounts (existing or not), or 20 times in
+total, within an hour is banned automatically: Dovecot refuses its IMAP, POP3, ManageSieve and
+SMTP AUTH logins, Postfix turns its SMTP connections away, and the web sign-in refuses it. The
+first ban lasts 24 hours, a second one 7 days and later ones 30 days. Accounts that signed in
+successfully from the address in the last day don't count, so a typo doesn't get anyone banned.
+
+Slow, distributed guessing is caught too: bot farms often try one made-up name (`admin`, `root`)
+every few hours from dozens of addresses in the same range. An address that tries 3 accounts that
+don't exist within a day is banned, and once 5 addresses in the same /24 (IPv6: /64) have done
+so, the whole range is banned. Addresses and ranges with a successful sign-in in the last 7 days
+are never banned by these slower rules.
+
+**Admin → Security → Banned addresses** lists the bans with how many attempts each one turned
+away, lets you ban an address or a whole network by hand (for a while or permanently), lift a
+ban, and keep an allowlist of networks that are never banned automatically (an office, say).
+The thresholds are `AUTOBAN_*` settings in `.env`; `AUTOBAN_ENABLED=0` turns automatic bans off.
 
 ### Locked out of the admin area
 
@@ -65,6 +84,9 @@ docker compose exec app node dist/cli.js passwd admin@example.com       # prompt
 docker compose exec app node dist/cli.js passwd admin@example.com --generate
 docker compose exec app node dist/cli.js logout admin@example.com       # or: logout --all
 docker compose exec app node dist/cli.js unlock                         # list lockouts; unlock <email|ip> clears one
+docker compose exec app node dist/cli.js bans                           # list IP bans
+docker compose exec app node dist/cli.js unban 203.0.113.7              # lift the bans covering an address
+docker compose exec app node dist/cli.js ban 203.0.113.0/24 48          # ban a network for 48 hours (no hours: forever)
 ```
 
 `passwd` also clears that account's sign-in lockout and signs it out of every web session.
@@ -131,7 +153,11 @@ packages/shared          zod schemas shared by server and web
 - Caddy obtains certificates; the `tls-sync` sidecar copies them to Postfix/Dovecot and
   reloads Dovecot on renewal.
 - Login attempts are rate limited in the app (web), Postfix (`anvil`) and Dovecot
-  (auth penalty).
+  (auth penalty). IP bans live in the `ip_bans` table; Postfix and Dovecot ask the
+  `ip_is_banned()` SQL function on every connection or sign-in.
+- Postfix, Dovecot and rspamd trust the compose network, except its gateway address:
+  Docker's userland proxy forwards some outside connections (IPv6 clients when the network
+  is IPv4-only) from the gateway, and trusting it would make the server an open relay.
 - Postfix and Dovecot write their logs to the `mail-logs` volume (and still to
   `docker compose logs`); the app reads them from there. Dovecot posts every sign-in
   result to the app's internal port 3001, which is never published. Queue actions from

@@ -146,6 +146,14 @@ export async function updateMailbox(m: MailboxRow, input: MailboxUpdate): Promis
   if (input.isAdmin === false || input.active === false) {
     await assertNotLastAdmin(m, "Cannot remove the last administrator.");
   }
+  if (input.receiveMail === false && m.receiveMail) {
+    // Postfix skips send-only destinations, so aliases that deliver here would silently stop working.
+    const aliases = await AliasRow.findAll({ where: { destination: m.email, active: true }, attributes: ["source"], order: [["source", "ASC"]] });
+    if (aliases.length) {
+      const names = aliases.map((a) => (a.source.startsWith("@") ? `the catch-all for ${a.source.slice(1)}` : a.source));
+      throw badRequest(`${names.join(", ")} ${aliases.length === 1 ? "delivers" : "deliver"} to this mailbox. Point ${aliases.length === 1 ? "it" : "them"} at another mailbox before making it send-only.`);
+    }
+  }
   if (input.displayName !== undefined) m.displayName = input.displayName;
   if (input.password !== undefined) m.passwordHash = await hashPassword(input.password);
   if (input.quotaBytes !== undefined) m.quotaBytes = input.quotaBytes;

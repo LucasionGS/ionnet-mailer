@@ -7,7 +7,7 @@ import { setPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { cn, passwordStrength } from "@/lib/utils";
-import { Button, Field, IconButton, Input, Textarea } from "@/components/ui";
+import { Button, Field, IconButton, Input, Switch, Textarea } from "@/components/ui";
 
 function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -37,12 +37,29 @@ export function SettingsPage() {
   const remoteAllow = useRemoteContentAllow();
   const [newSender, setNewSender] = useState("");
 
+  // Follow the saved profile when it changes (e.g. after saving, or another tab), but only the fields that changed,
+  // so an unrelated update to `me` (adding an image sender) doesn't throw away edits that aren't saved yet.
   useEffect(() => {
-    if (me) {
-      setDisplayName(me.displayName);
-      setSignature(me.signature ?? "");
+    if (!me) return;
+    setDisplayName(me.displayName);
+  }, [me?.displayName]);
+  useEffect(() => {
+    if (!me) return;
+    setSignature(me.signature ?? "");
+  }, [me?.signature]);
+
+  const [notificationsBlocked, setNotificationsBlocked] = useState(() => typeof Notification === "undefined" || Notification.permission === "denied");
+  const toggleNotifications = async (on: boolean) => {
+    if (!on) return setPrefs({ desktopNotifications: false });
+    const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== "granted") {
+      setNotificationsBlocked(permission === "denied");
+      toast.error("Notifications are not allowed", "Your browser didn't give this site permission to show notifications.");
+      return;
     }
-  }, [me]);
+    setPrefs({ desktopNotifications: true });
+    toast.success("Desktop notifications are on");
+  };
 
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -232,6 +249,21 @@ export function SettingsPage() {
                   {sec === 0 ? "Off" : `${sec} seconds`}
                 </button>
               ))}
+            </div>
+          </Field>
+        </Section>
+
+        <Section title="Notifications">
+          <Field
+            label="Desktop notifications"
+            hint={
+              notificationsBlocked
+                ? "Your browser blocks notifications for this site. Allow them in the site settings, then turn this on."
+                : "Show a notification when new mail arrives while this tab is in the background. The tab has to stay open."
+            }
+          >
+            <div>
+              <Switch checked={prefs.desktopNotifications && !notificationsBlocked} onChange={toggleNotifications} label="Desktop notifications" disabled={notificationsBlocked} />
             </div>
           </Field>
         </Section>

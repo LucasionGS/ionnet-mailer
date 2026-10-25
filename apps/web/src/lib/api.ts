@@ -1,4 +1,4 @@
-import { ACCOUNT_HEADER, MAIL_EVENT_TYPES, type ApiError, type DraftRequest, type MailEvent, type SendRequest } from "@ionnet/shared";
+import { ACCOUNT_HEADER, MAIL_EVENT_TYPES, type ApiError, type DraftRequest, type DraftResult, type MailEvent, type SendRequest } from "@ionnet/shared";
 
 export class ApiClientError extends Error {
   status: number;
@@ -124,7 +124,7 @@ export const api = {
 };
 
 /** `onProgress` reports the upload as 0–1; only worth passing when there are attachments. */
-export function sendMail(payload: SendRequest, files: File[], onProgress?: (fraction: number) => void): Promise<{ ok: true; messageId: string; rejected: string[] }> {
+export function sendMail(payload: SendRequest, files: File[], onProgress?: (fraction: number) => void): Promise<{ ok: true; messageId: string; rejected: string[]; warning?: string }> {
   if (!onProgress) return api.multipart("POST", "/api/mail/send", payload, files);
   // fetch can't report upload progress, XMLHttpRequest can
   return new Promise((resolve, reject) => {
@@ -154,7 +154,7 @@ export function sendMail(payload: SendRequest, files: File[], onProgress?: (frac
   });
 }
 
-export function saveDraft(payload: DraftRequest, files: File[]): Promise<{ uid: number }> {
+export function saveDraft(payload: DraftRequest, files: File[]): Promise<DraftResult> {
   return api.multipart("PUT", "/api/mail/drafts", payload, files);
 }
 
@@ -169,8 +169,8 @@ export function rawMessageUrl(folder: string, uid: number): string {
 /**
  * Subscribe to mail events. Returns an unsubscribe function.
  *
- * `onStatus` fires on every connect/disconnect: events that arrive while the
- * stream is down are lost, so callers should resync their cache on reconnect.
+ * `onStatus` fires on every connect ("ready" from the server) and disconnect: events that arrive while the
+ * stream is down are lost, so callers should resync their cache on every connect.
  */
 export function subscribeMailEvents(onEvent: (e: MailEvent) => void, onStatus?: (connected: boolean) => void): () => void {
   let es: EventSource | null = null;
@@ -190,10 +190,12 @@ export function subscribeMailEvents(onEvent: (e: MailEvent) => void, onStatus?: 
     if (closed) return;
     const src = new EventSource("/api/mail/events", { withCredentials: true });
     es = src;
-    src.onopen = () => {
+    // The server sends "ready" once it is actually watching the mailbox; only then does the stream count as up and
+    // the backoff reset. (onopen fires as soon as headers arrive, even for a stream that is about to fail.)
+    src.addEventListener("ready", () => {
       retry = 1000;
       onStatus?.(true);
-    };
+    });
     // The server tags each frame with its event type, so `onmessage` — which only
     // sees frames without an `event:` line — never fires. Subscribe by name.
     for (const type of MAIL_EVENT_TYPES) src.addEventListener(type, handle);

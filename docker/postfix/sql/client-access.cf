@@ -1,0 +1,9 @@
+hosts = postgres
+user = mailreader
+password = @@MAIL_DB_PASSWORD@@
+dbname = @@POSTGRES_DB@@
+# Addresses banned by the app for password guessing (see the ip_bans table). Postfix
+# also looks up the client's hostname and partial addresses here; ip_is_banned()
+# answers false for anything that is not an IP address.
+query = SELECT '554 5.7.1 Access denied: this address is blocked after repeated failed sign-ins'
+        WHERE ip_is_banned('%s')

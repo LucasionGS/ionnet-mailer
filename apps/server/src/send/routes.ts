@@ -1,13 +1,14 @@
 import { Hono, type Context } from "hono";
 import nodemailer from "nodemailer";
 import { Op } from "sequelize";
-import { DraftRequestSchema, SendRequestSchema, type Address } from "@ionnet/shared";
+import type { ImapFlow } from "imapflow";
+import { DraftRequestSchema, SendRequestSchema, type Address, type DraftResult, type SendRequest } from "@ionnet/shared";
 import type { AppEnv } from "../http/types.ts";
 import { config } from "../config.ts";
 import { ContactRow, MailboxRow, RecentAddress } from "../db/models.ts";
 import { badRequest, forbidden } from "../errors.ts";
 import { parseWith } from "../http/validate.ts";
-import { pool } from "../mail/pool.ts";
+import { lockFolder, pool } from "../mail/pool.ts";
 import { findSpecialFolder } from "../mail/folders.ts";
 import { loadMessage, invalidate } from "../mail/message.ts";
 import { buildMime, type ComposeInput } from "./compose.ts";
@@ -83,13 +84,36 @@ async function rememberRecipients(user: MailboxRow, recipients: Address[]) {
   }
 }
 
+/** Flags the message a reply or forward answers: by reference, or for a reopened draft by its Message-ID in INBOX. */
+async function markOriginal(client: ImapFlow, user: MailboxRow, req: SendRequest) {
+  const flag = req.replyMode === "forward" ? "$Forwarded" : "\\Answered";
+  let target = req.inReplyTo;
+  if (!target && req.threadHeaders?.inReplyTo) {
+    const lock = await lockFolder(client, "INBOX");
+    try {
+      const found = await client.search({ header: { "message-id": req.threadHeaders.inReplyTo } }, { uid: true });
+      if (found && found.length) target = { folder: "INBOX", uid: found[found.length - 1]! };
+    } finally {
+      lock.release();
+    }
+  }
+  if (!target || (req.inReplyTo && !req.replyMode)) return;
+  const lock = await lockFolder(client, target.folder);
+  try {
+    await client.messageFlagsAdd([target.uid], [flag], { uid: true });
+  } finally {
+    lock.release();
+  }
+  invalidate(user.id, target.folder, target.uid);
+}
+
 sendRoutes.post("/send", async (c) => {
   const user = c.get("user");
   const { payload, uploads } = await readForm(c);
   const req = parseWith(SendRequestSchema, payload);
   const from = await resolveFrom(user, req.fromAddress, req.fromName);
   const [forwarded, original] = await Promise.all([collectForwarded(user, req.forwardAttachments), originalHeaders(user, req.inReplyTo)]);
-  const { raw, messageId, envelope } = await buildMime({ req, from, domain: user.email.split("@")[1]!, uploads, forwarded, original });
+  const { raw, copy, messageId, envelope } = await buildMime({ req, from, domain: user.email.split("@")[1]!, uploads, forwarded, original });
 
   const transport = nodemailer.createTransport({ host: config.SMTP_HOST, port: config.SMTP_PORT, secure: false, ignoreTLS: true, name: config.MAIL_HOSTNAME });
   // Postfix turns individual recipients away (send-only mailboxes); the rest still get the message.
@@ -102,30 +126,29 @@ sendRoutes.post("/send", async (c) => {
     throw badRequest(`Could not hand the message to the mail server: ${(err as Error).message}`);
   }
 
-  await pool.withClient(user, async (client) => {
-    const sent = await findSpecialFolder(client, "sent");
-    await client.append(sent, raw, ["\\Seen"]);
-    if (req.inReplyTo && req.replyMode) {
-      const lock = await client.getMailboxLock(req.inReplyTo.folder);
-      try {
-        await client.messageFlagsAdd([req.inReplyTo.uid], [req.replyMode === "reply" ? "\\Answered" : "$Forwarded"], { uid: true });
-      } finally {
-        lock.release();
+  // The message is on its way: nothing below may turn this into an error, or the user would send it again.
+  let warning: string | undefined;
+  await pool
+    .withClient(user, async (client) => {
+      const sent = await findSpecialFolder(client, "sent");
+      await client.append(sent, copy, ["\\Seen"]).catch((err: Error) => {
+        warning = "The message was sent, but a copy could not be saved in Sent (is the mailbox full?).";
+        log.warn(`could not save sent copy for ${user.email}: ${err.message}`);
+      });
+      await markOriginal(client, user, req).catch((err: Error) => log.warn(`could not flag the original of a reply: ${err.message}`));
+      if (req.draftUid) {
+        const drafts = await findSpecialFolder(client, "drafts");
+        const lock = await lockFolder(client, drafts);
+        try {
+          await client.messageDelete([req.draftUid], { uid: true });
+        } finally {
+          lock.release();
+        }
       }
-      invalidate(user.id, req.inReplyTo.folder, req.inReplyTo.uid);
-    }
-    if (req.draftUid) {
-      const drafts = await findSpecialFolder(client, "drafts");
-      const lock = await client.getMailboxLock(drafts);
-      try {
-        await client.messageDelete([req.draftUid], { uid: true });
-      } finally {
-        lock.release();
-      }
-    }
-  });
+    })
+    .catch((err: Error) => log.warn(`post-send cleanup failed for ${user.email}: ${err.message}`));
   await rememberRecipients(user, [...req.to, ...req.cc, ...req.bcc]).catch((err) => log.warn("could not record recipients", err));
-  return c.json({ ok: true, messageId, rejected });
+  return c.json({ ok: true, messageId, rejected, ...(warning ? { warning } : {}) });
 });
 
 sendRoutes.put("/drafts", async (c) => {
@@ -134,20 +157,30 @@ sendRoutes.put("/drafts", async (c) => {
   const req = parseWith(DraftRequestSchema, payload);
   const from = await resolveFrom(user, req.fromAddress, req.fromName);
   const [forwarded, original] = await Promise.all([collectForwarded(user, req.forwardAttachments), originalHeaders(user, req.inReplyTo)]);
-  const { raw, messageId } = await buildMime({ req, from, domain: user.email.split("@")[1]!, uploads, forwarded, original });
+  const { copy, messageId } = await buildMime({ req, from, domain: user.email.split("@")[1]!, uploads, forwarded, original });
 
-  const uid = await pool.withClient(user, async (client) => {
+  const result = await pool.withClient(user, async (client): Promise<DraftResult> => {
     const drafts = await findSpecialFolder(client, "drafts");
-    const res = await client.append(drafts, raw, ["\\Draft", "\\Seen"]);
-    const lock = await client.getMailboxLock(drafts);
+    const res = await client.append(drafts, copy, ["\\Draft", "\\Seen"]);
+    let uid = 0;
+    const lock = await lockFolder(client, drafts);
     try {
       if (req.draftUid) await client.messageDelete([req.draftUid], { uid: true }).catch(() => undefined);
-      if (res && res.uid) return res.uid;
-      const found = await client.search({ header: { "message-id": messageId } }, { uid: true });
-      return found && found.length ? found[found.length - 1]! : 0;
+      if (res && res.uid) uid = res.uid;
+      else {
+        const found = await client.search({ header: { "message-id": messageId } }, { uid: true });
+        uid = found && found.length ? found[found.length - 1]! : 0;
+      }
     } finally {
       lock.release();
     }
+    if (!uid) return { uid, attachments: [] };
+    // Attachments now live in the draft; later saves copy them from here instead of uploading them again.
+    const parsed = await loadMessage(client, user.id, drafts, uid);
+    const attachments = parsed.message.attachments
+      .filter((a) => !a.inline)
+      .map((a) => ({ ref: { folder: drafts, uid }, partId: a.partId, filename: a.filename, size: a.size }));
+    return { uid, attachments };
   });
-  return c.json({ uid });
+  return c.json(result);
 });

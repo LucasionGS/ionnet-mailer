@@ -4,6 +4,7 @@ import type { AuthSource } from "@ionnet/shared";
 import { config } from "../config.ts";
 import { logger } from "../logger.ts";
 import { failureReason, recordAuthEvent } from "./auth-events.ts";
+import { isBanned, recordBanHit } from "../auth/bans.ts";
 
 const log = logger("dovecot-events");
 
@@ -40,11 +41,17 @@ async function handle(e: DovecotEvent): Promise<void> {
 
   const username = str("original_user") ?? str("user");
   const success = f.success === "yes";
-  const { reason, mailboxId } = success ? { reason: null, mailboxId: null } : await failureReason(username);
+  const ip = str("remote_ip");
+  let { reason, mailboxId } = success ? { reason: null, mailboxId: null } : await failureReason(username);
+  // Dovecot's "banned" passdb turned it away before the password was checked.
+  if (!success && ip && (await isBanned(ip))) {
+    reason = "banned";
+    await recordBanHit(ip);
+  }
   await recordAuthEvent({
     source: SOURCES[protocol] ?? "other",
     username,
-    ip: str("remote_ip"),
+    ip,
     success,
     reason,
     mailboxId,

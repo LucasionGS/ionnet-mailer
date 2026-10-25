@@ -6,10 +6,12 @@ export interface Prefs {
   /** width of the conversation list on wide screens */
   listWidth: number;
   foldersCollapsed: boolean;
+  /** show a desktop notification for new mail while the tab is in the background */
+  desktopNotifications: boolean;
 }
 
 const KEY = "ionnet.prefs";
-const DEFAULTS: Prefs = { undoSendSeconds: 5, listWidth: 400, foldersCollapsed: false };
+const DEFAULTS: Prefs = { undoSendSeconds: 5, listWidth: 400, foldersCollapsed: false, desktopNotifications: false };
 const listeners = new Set<() => void>();
 
 function read(): Prefs {

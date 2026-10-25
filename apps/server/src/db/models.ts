@@ -283,6 +283,37 @@ AuditRow.init(
   { sequelize, tableName: "audit_log" },
 );
 
+/** An address or network banned from signing in; see migration 0006 and auth/bans.ts. */
+export class IpBanRow extends Model<InferAttributes<IpBanRow>, InferCreationAttributes<IpBanRow>> {
+  declare id: CreationOptional<string>;
+  declare network: string;
+  declare reason: string | null;
+  declare source: string;
+  declare createdBy: string | null;
+  declare createdAt: CreationOptional<Date>;
+  declare expiresAt: Date | null;
+  declare liftedAt: CreationOptional<Date | null>;
+  declare liftedBy: CreationOptional<string | null>;
+  declare hits: CreationOptional<number>;
+  declare lastHitAt: CreationOptional<Date | null>;
+}
+IpBanRow.init(
+  {
+    id: { type: DataTypes.BIGINT, autoIncrement: true, primaryKey: true },
+    network: { type: DataTypes.CIDR, allowNull: false },
+    reason: { type: DataTypes.STRING(255), allowNull: true },
+    source: { type: DataTypes.STRING(16), allowNull: false },
+    createdBy: { type: DataTypes.STRING(254), allowNull: true },
+    createdAt: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    expiresAt: { type: DataTypes.DATE, allowNull: true },
+    liftedAt: { type: DataTypes.DATE, allowNull: true },
+    liftedBy: { type: DataTypes.STRING(254), allowNull: true },
+    hits: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    lastHitAt: { type: DataTypes.DATE, allowNull: true },
+  },
+  { sequelize, tableName: "ip_bans" },
+);
+
 Domain.hasMany(MailboxRow, { foreignKey: "domainId", as: "mailboxes" });
 MailboxRow.belongsTo(Domain, { foreignKey: "domainId", as: "domain" });
 Domain.hasMany(AliasRow, { foreignKey: "domainId", as: "aliases" });

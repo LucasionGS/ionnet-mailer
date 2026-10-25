@@ -20,6 +20,8 @@ export interface ComposerState {
   quote: string;
   inReplyTo: MessageRef | null;
   replyMode: "reply" | "forward" | null;
+  /** In-Reply-To/References of a reply reopened from Drafts, which has no `inReplyTo` message any more */
+  threadHeaders: { inReplyTo: string; references: string[] } | null;
   forwardAttachments: Array<{ ref: MessageRef; partId: string; filename: string; size: number }>;
   draftUid: number | null;
   /** add the user's signature on send (only applies when they have one) */
@@ -62,6 +64,7 @@ export function openComposer(init: ComposerInit = {}) {
     quote: init.quote ?? "",
     inReplyTo: init.inReplyTo ?? null,
     replyMode: init.replyMode ?? null,
+    threadHeaders: init.threadHeaders ?? null,
     forwardAttachments: init.forwardAttachments ?? [],
     draftUid: init.draftUid ?? null,
     signature: init.signature ?? true,
@@ -91,6 +94,16 @@ export function updateComposer(patch: Partial<ComposerState>, forKey?: number) {
   if (!state || (forKey !== undefined && state.key !== forKey)) return;
   state = { ...state, ...patch };
   emit();
+}
+
+/**
+ * Records what the user typed without re-rendering anyone. When an inline reply moves to the docked window, the new
+ * composer reads the store while rendering, before the old one's unmount cleanup runs, so the store must already
+ * hold the latest text. The state object is updated in place, which is why no listener is told.
+ */
+export function stashComposer(patch: Partial<ComposerState>, forKey: number) {
+  if (!state || state.key !== forKey) return;
+  Object.assign(state, patch);
 }
 
 let flush: (() => Promise<boolean>) | null = null;

@@ -9,6 +9,24 @@ set -eu
 : "${POSTFIX_RELAYHOST:=}"
 : "${POSTFIX_SMTP_TLS_SECURITY_LEVEL:=may}"
 
+# The compose subnet minus its gateway (the first host address), as CIDRs separated
+# by $2 (default a space). Docker's userland proxy forwards some connections (IPv6
+# clients when the network is IPv4-only, and host-local ones) from the gateway, so
+# trusting the whole subnet would trust arbitrary internet clients. The dev stack sets
+# TRUST_DOCKER_GATEWAY=1 so mail can be injected from the host.
+trusted_networks() {
+  if [ "${TRUST_DOCKER_GATEWAY:-0}" = "1" ]; then echo "$1"; return; fi
+  echo "$1" | awk -F'[./]' -v sep="${2:- }" '{
+    p = $5; net = (($1 * 256 + $2) * 256 + $3) * 256 + $4
+    size = 2 ^ (32 - p); net = net - (net % size); gw = net + 1
+    for (b = 32; b > p; b--) {
+      blk = 2 ^ (32 - b); sib = gw - (gw % blk)
+      sib = (int(sib / blk) % 2 == 0) ? sib + blk : sib - blk
+      printf "%s%d.%d.%d.%d/%d", (b < 32 ? sep : ""), int(sib / 16777216) % 256, int(sib / 65536) % 256, int(sib / 256) % 256, sib % 256, b
+    }
+  }'
+}
+
 # Render SQL map files with credentials (readable by root and postfix only).
 mkdir -p /etc/postfix/sql
 for f in /etc/postfix/sql.template/*.cf; do
@@ -19,7 +37,7 @@ chown -R root:postfix /etc/postfix/sql
 chmod 0640 /etc/postfix/sql/*.cf
 
 postconf -e "myhostname=$MAIL_HOSTNAME" \
-           "mynetworks=127.0.0.0/8 [::1]/128 $MAIL_NETWORK_SUBNET" \
+           "mynetworks=127.0.0.0/8 [::1]/128 $(trusted_networks "$MAIL_NETWORK_SUBNET")" \
            "relayhost=$POSTFIX_RELAYHOST" \
            "smtp_tls_security_level=$POSTFIX_SMTP_TLS_SECURITY_LEVEL"
 

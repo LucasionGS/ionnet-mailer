@@ -92,6 +92,8 @@ export function HtmlFrame({ html, allowRemote }: { html: string; allowRemote: bo
       d?.querySelectorAll("img").forEach((img) => img.addEventListener("load", measure));
     };
     el.addEventListener("load", onLoad);
+    // A small document can finish loading before this effect runs, and then "load" never comes.
+    if (el.contentDocument?.readyState === "complete" && el.contentDocument.URL === "about:srcdoc") onLoad();
     return () => {
       el.removeEventListener("load", onLoad);
       ro?.disconnect();

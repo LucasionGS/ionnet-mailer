@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { Op } from "sequelize";
 import { config } from "../config.ts";
-import { MailboxRow, Session } from "../db/models.ts";
+import { Domain, MailboxRow, Session } from "../db/models.ts";
 
 /** The active session: every authenticated request runs as its mailbox. */
 export const COOKIE = "ionnet_session";
@@ -16,6 +16,26 @@ const TTL_MS = 30 * 24 * 3600 * 1000;
 const REFRESH_AFTER_MS = 24 * 3600 * 1000;
 /** A crafted cookie must not turn into an unbounded lookup. */
 const MAX_COOKIE_IDS = 16;
+
+let disabledDomains: { at: number; ids: Set<string> } | null = null;
+
+/** Ids of disabled domains, cached briefly: every request checks them, and their mailboxes cannot sign in. */
+async function disabledDomainIds(): Promise<Set<string>> {
+  if (disabledDomains && Date.now() - disabledDomains.at < 15_000) return disabledDomains.ids;
+  const rows = await Domain.findAll({ where: { active: false }, attributes: ["id"] });
+  disabledDomains = { at: Date.now(), ids: new Set(rows.map((d) => d.id)) };
+  return disabledDomains.ids;
+}
+
+/** Call after enabling or disabling a domain. */
+export function forgetDisabledDomains() {
+  disabledDomains = null;
+}
+
+/** Whether `user` may sign in and use the app: the mailbox and its domain are both active. */
+export async function canSignIn(user: MailboxRow): Promise<boolean> {
+  return user.active && !(await disabledDomainIds()).has(user.domainId);
+}
 
 export interface SignedIn {
   session: Session;
@@ -46,7 +66,10 @@ function writeIds(c: Context, ids: string[]) {
 async function resolve(ids: string[]): Promise<SignedIn[]> {
   if (!ids.length) return [];
   const sessions = await Session.findAll({ where: { id: ids, expiresAt: { [Op.gt]: new Date() } } });
-  const users = sessions.length ? await MailboxRow.findAll({ where: { id: sessions.map((s) => s.mailboxId), active: true } }) : [];
+  const disabled = await disabledDomainIds();
+  const users = sessions.length
+    ? (await MailboxRow.findAll({ where: { id: sessions.map((s) => s.mailboxId), active: true } })).filter((u) => !disabled.has(u.domainId))
+    : [];
   const out: SignedIn[] = [];
   for (const id of ids) {
     const session = sessions.find((s) => s.id === id);
@@ -84,7 +107,7 @@ export async function loadSession(c: Context): Promise<SignedIn | null> {
     return null;
   }
   const user = await MailboxRow.findByPk(session.mailboxId);
-  if (!user || !user.active) return null;
+  if (!user || !(await canSignIn(user))) return null;
   // Sliding expiry: extend at most once a day to keep writes low.
   if (session.expiresAt.getTime() - Date.now() < TTL_MS - REFRESH_AFTER_MS) {
     session.expiresAt = new Date(Date.now() + TTL_MS);

@@ -6,6 +6,7 @@ import { sequelize } from "./db/sequelize.ts";
 import { hashPassword } from "./auth/password.ts";
 import { clearFailures, listLockouts, removeLockout } from "./auth/ratelimit.ts";
 import { closeRedis } from "./redis.ts";
+import { createBan, displayNetwork, liftBansFor, listBans } from "./auth/bans.ts";
 
 /**
  * Recovery commands for when nobody can get into the admin area, run inside the app container:
@@ -18,6 +19,9 @@ const USAGE = `usage: cli <command>
                                  also clears the account's lockout and signs it out everywhere
   logout <email> | --all         sign out every web session of one mailbox, or of everyone
   unlock [<email|ip>]            clear sign-in lockouts; with no argument, list them
+  bans                           list active IP bans
+  ban <ip|network> [hours]       ban an address from every sign-in (permanent without hours)
+  unban <ip|network>             lift every active ban covering an address
 `;
 
 class UsageError extends Error {}
@@ -118,6 +122,31 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     await removeLockout(key);
     await audit("lockout.remove", key);
     console.log(`cleared ${key}`);
+  },
+
+  async bans() {
+    const { bans, allowlist } = await listBans(false);
+    if (!bans.length) console.log("no active bans");
+    for (const b of bans) {
+      console.log(`${b.network}  ${b.source}, until ${b.expiresAt ?? "forever"}, ${b.hits} blocked attempt(s)${b.reason ? ` - ${b.reason}` : ""}`);
+    }
+    if (allowlist.length) console.log(`never banned automatically: ${allowlist.join(", ")}`);
+  },
+
+  async ban([target, hours]) {
+    if (!target) throw new UsageError("missing <ip|network>");
+    const h = hours === undefined ? null : Number(hours);
+    if (h !== null && !(h > 0)) throw new UsageError("hours must be a positive number");
+    const ban = await createBan(target, h, "Banned from the command line", null);
+    await audit("ban.create", displayNetwork(ban.network), { hours: h });
+    console.log(`banned ${displayNetwork(ban.network)} ${h === null ? "permanently" : `for ${h} hour(s)`}`);
+  },
+
+  async unban([target]) {
+    if (!target) throw new UsageError("missing <ip|network>");
+    const n = await liftBansFor(target, null);
+    if (n) await audit("ban.lift", target.trim());
+    console.log(n ? `lifted ${n} ban(s) covering ${target}` : `no active ban covers ${target}`);
   },
 };
 

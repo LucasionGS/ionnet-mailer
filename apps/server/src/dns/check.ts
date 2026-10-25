@@ -47,6 +47,12 @@ function evaluate(spec: RecordSpec, found: string[]): DnsRecord["status"] {
       return hits.some((h) => h.split(" ").pop() === want) ? "ok" : "mismatch";
     case "srv":
       return hits.some((h) => h.endsWith(want)) ? "ok" : "mismatch";
+    case "dkim": {
+      // Only the key matters: providers reformat the rest ("v=DKIM1;k=rsa;p=…", tags left out or reordered).
+      const key = (txt: string) => /(?:^|;)\s*p=([^;]*)/i.exec(txt)?.[1]?.replace(/\s+/g, "") ?? "";
+      const wanted = key(spec.expect);
+      return wanted && found.some((f) => key(f) === wanted) ? "ok" : "mismatch";
+    }
   }
 }
 

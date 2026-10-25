@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ImapFlow } from "imapflow";
 import { stream } from "hono/streaming";
 import {
   DeleteRequestSchema,
@@ -7,6 +8,7 @@ import {
   MoveRequestSchema,
   type Folder,
   type MessageRef,
+  type MoveResult,
   type Quota,
   type Thread,
 } from "@ionnet/shared";
@@ -14,7 +16,7 @@ import type { AppEnv } from "../http/types.ts";
 import { requireAuth } from "../http/middleware.ts";
 import { parseJson } from "../http/validate.ts";
 import { badRequest, notFound } from "../errors.ts";
-import { pool } from "./pool.ts";
+import { lockFolder, pool } from "./pool.ts";
 import { findSpecialFolder, listFolders } from "./folders.ts";
 import { listThreads, rootFromThreadId, threadUids } from "./threads.ts";
 import { fetchRaw, invalidate, loadMessage, loadMessages } from "./message.ts";
@@ -128,7 +130,7 @@ mailRoutes.post("/messages/flags", async (c) => {
   const user = c.get("user");
   await pool.withClient(user, async (client) => {
     for (const [folder, uids] of byFolder(body.messages)) {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await lockFolder(client, folder);
       try {
         if (body.add.length) await client.messageFlagsAdd(uids, body.add, { uid: true });
         if (body.remove.length) await client.messageFlagsRemove(uids, body.remove, { uid: true });
@@ -141,41 +143,53 @@ mailRoutes.post("/messages/flags", async (c) => {
   return c.json({ ok: true });
 });
 
+/** Moves `uids` and records where each one landed (from the server's COPYUID answer). */
+async function moveAndMap(client: ImapFlow, folder: string, uids: number[], destination: string, moved: MoveResult["moved"]) {
+  const res = await client.messageMove(uids, destination, { uid: true });
+  const map = res && res.uidMap ? res.uidMap : new Map<number, number>();
+  for (const uid of uids) {
+    const to = map.get(uid);
+    if (to) moved.push({ from: { folder, uid }, to: { folder: destination, uid: to } });
+  }
+}
+
 mailRoutes.post("/messages/move", async (c) => {
   const body = await parseJson(c, MoveRequestSchema);
   const user = c.get("user");
+  const moved: MoveResult["moved"] = [];
   await pool.withClient(user, async (client) => {
     for (const [folder, uids] of byFolder(body.messages)) {
       if (folder === body.destination) continue;
-      const lock = await client.getMailboxLock(folder);
+      const lock = await lockFolder(client, folder);
       try {
-        await client.messageMove(uids, body.destination, { uid: true });
+        await moveAndMap(client, folder, uids, body.destination, moved);
       } finally {
         lock.release();
       }
       for (const uid of uids) invalidate(user.id, folder, uid);
     }
   });
-  return c.json({ ok: true });
+  return c.json({ ok: true, moved } satisfies MoveResult);
 });
 
 mailRoutes.post("/messages/delete", async (c) => {
   const body = await parseJson(c, DeleteRequestSchema);
   const user = c.get("user");
+  const moved: MoveResult["moved"] = [];
   await pool.withClient(user, async (client) => {
     const trash = await findSpecialFolder(client, "trash");
     for (const [folder, uids] of byFolder(body.messages)) {
-      const lock = await client.getMailboxLock(folder);
+      const lock = await lockFolder(client, folder);
       try {
         if (body.permanent || folder === trash) await client.messageDelete(uids, { uid: true });
-        else await client.messageMove(uids, trash, { uid: true });
+        else await moveAndMap(client, folder, uids, trash, moved);
       } finally {
         lock.release();
       }
       for (const uid of uids) invalidate(user.id, folder, uid);
     }
   });
-  return c.json({ ok: true });
+  return c.json({ ok: true, moved } satisfies MoveResult);
 });
 
 mailRoutes.get("/quota", async (c) => {

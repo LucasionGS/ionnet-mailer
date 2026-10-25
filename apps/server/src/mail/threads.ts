@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { FetchMessageObject, ImapFlow, MessageStructureObject, SearchObject } from "imapflow";
 import type { Address, ThreadList, ThreadSummary } from "@ionnet/shared";
 import { badRequest } from "../errors.ts";
+import { lockFolder } from "./pool.ts";
 
 const PAGE = 50;
 /** Unlinked messages sharing subject and sender are only merged when sent at most this far apart. */
@@ -58,6 +59,12 @@ export interface Envelope {
   snippet: string;
 }
 
+function validDate(d: Date | string | undefined): Date | null {
+  if (!d) return null;
+  const date = new Date(d);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function toEnvelope(m: FetchMessageObject, references: string[] = []): Envelope {
   const env = m.envelope ?? {};
   return {
@@ -66,7 +73,8 @@ export function toEnvelope(m: FetchMessageObject, references: string[] = []): En
     inReplyTo: tidy(env.inReplyTo),
     references,
     subject: env.subject ?? "",
-    date: env.date ? new Date(env.date) : m.internalDate ? new Date(m.internalDate) : new Date(0),
+    // Arrival time, not the sender's Date header: a wrong or future-dated header must not bury new mail or pin spam on top.
+    date: validDate(m.internalDate) ?? validDate(env.date) ?? new Date(0),
     from: addr(env.from?.[0]),
     to: (env.to ?? []).map(addr).filter((x): x is Address => !!x),
     flags: m.flags ?? new Set(),
@@ -256,7 +264,7 @@ export async function listThreads(
   opts: { cursor?: string; limit?: number; q?: string },
 ): Promise<ThreadList> {
   const limit = Math.min(Math.max(opts.limit ?? PAGE, 1), 200);
-  const lock = await client.getMailboxLock(folder);
+  const lock = await lockFolder(client, folder);
   try {
     const query = opts.q?.trim() ? { text: opts.q.trim() } : { all: true };
     const all = ((await client.search(query, { uid: true })) || []).sort((a, b) => a - b);
@@ -285,9 +293,16 @@ function chunk<T>(list: T[], size: number): T[][] {
  * applies the same subject fallback, so opening a thread shows every message the list grouped into it.
  */
 export async function threadUids(client: ImapFlow, folder: string, rootMessageId: string): Promise<number[]> {
-  const lock = await client.getMailboxLock(folder);
+  const lock = await lockFolder(client, folder);
   try {
     const known = new Map<number, Envelope>();
+    // Messages without a Message-ID get a stand-in id carrying their UID (see toEnvelope); start from that message.
+    const synthetic = /^<uid-(\d+)@local>$/.exec(rootMessageId);
+    if (synthetic) {
+      for (const e of await fetchEnvelopes(client, [Number(synthetic[1])], { snippets: false })) {
+        if (e.messageId === rootMessageId) known.set(e.uid, e);
+      }
+    }
     const searchedIds = new Set<string>();
     const searchedSubjects = new Set<string>();
     let ids = [rootMessageId];

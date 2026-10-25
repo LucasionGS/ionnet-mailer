@@ -46,8 +46,15 @@ export function htmlToText(html: string): string {
 
 const fmt = (a: { name?: string; address: string }) => (a.name ? { name: a.name, address: a.address } : a.address);
 
-export async function buildMime(input: ComposeInput): Promise<{ raw: Buffer; messageId: string; envelope: { from: string; to: string[] } }> {
-  const { req, from, domain, original } = input;
+/**
+ * Builds the message. `raw` is what goes over SMTP; `copy` is the same message with its Bcc header kept, for the
+ * Sent and Drafts copies (nodemailer leaves Bcc out unless asked, so recipients never see it).
+ */
+export async function buildMime(input: ComposeInput): Promise<{ raw: Buffer; copy: Buffer; messageId: string; envelope: { from: string; to: string[] } }> {
+  const { req, from, domain } = input;
+  // A reply reopened from Drafts has no original message to point at, only the headers the draft kept.
+  const th = req.threadHeaders;
+  const original = input.original ?? (th ? { messageId: th.inReplyTo, references: th.references.filter((r) => r !== th.inReplyTo) } : null);
   const messageId = `<${randomUUID()}@${domain}>`;
   const references = original ? [...original.references, ...(original.messageId ? [original.messageId] : [])] : [];
   const html = req.html?.trim() ? req.html : undefined;
@@ -75,6 +82,9 @@ export async function buildMime(input: ComposeInput): Promise<{ raw: Buffer; mes
     headers: req.requestReadReceipt ? { "Disposition-Notification-To": from.address } : undefined,
   };
   const raw = await new MailComposer(options).compile().build();
+  const withBcc = new MailComposer(options).compile();
+  withBcc.keepBcc = true;
+  const copy = req.bcc.length ? await withBcc.build() : raw;
   const to = [...(req.to ?? []), ...req.cc, ...req.bcc].map((r) => r.address);
-  return { raw, messageId, envelope: { from: from.address, to } };
+  return { raw, copy, messageId, envelope: { from: from.address, to } };
 }

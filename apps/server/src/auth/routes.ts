@@ -5,10 +5,11 @@ import type { AppEnv } from "../http/types.ts";
 import { parseJson, parseWith } from "../http/validate.ts";
 import { MailboxRow, Domain } from "../db/models.ts";
 import { hashPassword, needsRehash, verifyPassword } from "./password.ts";
-import { COOKIE, createSession, destroySession, loadAccounts, switchSession } from "./session.ts";
+import { COOKIE, canSignIn, createSession, destroySession, loadAccounts, switchSession } from "./session.ts";
 import { clearFailures, isLocked, recordFailure } from "./ratelimit.ts";
+import { isBanned, recordBanHit } from "./bans.ts";
 import { requireAuth } from "../http/middleware.ts";
-import { badRequest, notFound, tooMany, unauthorized } from "../errors.ts";
+import { HttpError, badRequest, notFound, tooMany, unauthorized } from "../errors.ts";
 import { pool } from "../mail/pool.ts";
 import { logger } from "../logger.ts";
 
@@ -40,6 +41,11 @@ authRoutes.post("/login", async (c) => {
   const userAgent = c.req.header("user-agent") ?? null;
   const attempt = { source: "web" as const, username: email, ip, userAgent };
 
+  if (await isBanned(ip)) {
+    await Promise.all([recordAuthEvent({ ...attempt, success: false, reason: "banned" }), recordBanHit(ip)]);
+    throw new HttpError(403, "ip_banned", "Sign-in from your network is blocked after repeated failed attempts. Ask your administrator to lift the ban.");
+  }
+
   const [ipLock, userLock] = await Promise.all([isLocked("ip", ip), isLocked("user", email)]);
   const lock = Math.max(ipLock, userLock);
   if (lock > 0) {
@@ -48,9 +54,10 @@ authRoutes.post("/login", async (c) => {
   }
 
   const user = await MailboxRow.findOne({ where: { email } });
-  const ok = user && user.active && (await verifyPassword(password, user.passwordHash));
+  const usable = user ? await canSignIn(user) : false;
+  const ok = user && usable && (await verifyPassword(password, user.passwordHash));
   if (!ok) {
-    const reason = !user ? "unknown_user" : !user.active ? "disabled" : "wrong_password";
+    const reason = !user ? "unknown_user" : !usable ? "disabled" : "wrong_password";
     await recordAuthEvent({ ...attempt, success: false, reason, mailboxId: user?.id ?? null });
     const [a, b] = await Promise.all([recordFailure("ip", ip), recordFailure("user", email)]);
     const locked = Math.max(a, b);

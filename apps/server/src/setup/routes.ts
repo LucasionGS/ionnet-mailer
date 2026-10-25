@@ -13,7 +13,7 @@ import { getPublicIp } from "../dns/publicip.ts";
 import { checkHostname, checkDomainDns } from "../dns/check.ts";
 import { isSetupCompleted, markSetupCompleted, verifySetupToken } from "./token.ts";
 import { afterDomainCommit, createDomain, createMailbox, requireDomain, sequelize } from "../admin/service.ts";
-import { setSetting } from "../db/models.ts";
+import { Domain, setSetting } from "../db/models.ts";
 import { createSession } from "../auth/session.ts";
 import { logger } from "../logger.ts";
 
@@ -35,11 +35,13 @@ const requireToken = async (c: Parameters<Parameters<typeof setupRoutes.use>[1]>
 };
 
 setupRoutes.get("/status", async (c) => {
+  const completed = await isSetupCompleted();
   const status: SetupStatus = {
-    completed: await isSetupCompleted(),
+    completed,
     hostname: config.MAIL_HOSTNAME,
     publicIp: await getPublicIp(),
     version: config.version,
+    createdDomainId: completed ? null : ((await Domain.findOne({ order: [["createdAt", "ASC"]], attributes: ["id"] }))?.id ?? null),
   };
   return c.json(status);
 });

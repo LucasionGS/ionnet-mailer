@@ -41,6 +41,10 @@ virtual_transport = lmtp:inet:dovecot:24
 # Rejects mail for send-only mailboxes; first in every listener's recipient restrictions
 # (master.cf too) so neither local senders nor the web app can deliver to them.
 send_only_recipients = check_recipient_access proxy:pgsql:/etc/postfix/sql/recipient-access.cf
+# Clients the app banned for password guessing. Port 25 checks it with the client
+# restrictions (at RCPT, see smtpd_delay_reject); submission and smtps check it on
+# connect, before AUTH (master.cf).
+banned_clients = check_client_access proxy:pgsql:/etc/postfix/sql/client-access.cf
 lmtp_tls_security_level = none
 
 # ---- SASL via Dovecot -------------------------------------------------------
@@ -72,6 +76,9 @@ tls_preempt_cipherlist = no
 # ---- Header checks ----------------------------------------------------------
 # Logs each Subject so the admin mail log can show it (cleanup_submission has its own file).
 header_checks = regexp:/etc/postfix/header_checks
+# Header checks apply to the message's own headers only, not to the headers of an attached
+# message (which would log its Subject as this one's, and strip headers from forwarded mail).
+nested_header_checks =
 
 # ---- rspamd milter ----------------------------------------------------------
 smtpd_milters = inet:rspamd:11332
@@ -86,10 +93,10 @@ smtpd_delay_reject = yes
 disable_vrfy_command = yes
 strict_rfc821_envelopes = yes
 # With smtpd_delay_reject every list runs at RCPT TO, in the order client, helo, sender,
-# relay, recipient. The client, HELO and sender checks live in the recipient list so that
-# relay attempts (bots probing for an open relay) hit reject_unauth_destination first and
+# relay, recipient. Apart from the ban list, the client, HELO and sender checks live in
+# the recipient list so that relay attempts (bots probing for an open relay) hit reject_unauth_destination first and
 # get a permanent "Relay access denied" instead of a 4xx that invites a retry.
-smtpd_client_restrictions =
+smtpd_client_restrictions = $banned_clients
 smtpd_helo_restrictions =
 smtpd_sender_restrictions =
 smtpd_relay_restrictions =

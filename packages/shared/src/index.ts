@@ -46,6 +46,10 @@
  *   GET    /api/admin/status                    -> ServerStatus
  *   GET    /api/admin/lockouts                  -> Lockout[]
  *   DELETE /api/admin/lockouts/:key             -> { ok }
+ *   GET    /api/admin/bans?all=                 -> IpBanList                 (active bans; all=1 adds lifted/expired ones)
+ *   POST   /api/admin/bans                      IpBanCreate -> IpBan
+ *   DELETE /api/admin/bans/:id                  -> { ok }                    (lifts the ban)
+ *   PUT    /api/admin/bans/allowlist            IpAllowlistUpdate -> IpBanList
  *   GET    /api/admin/overview?range=&tz=       -> Overview                  (range 24h|7d|30d, tz = IANA zone for day buckets)
  *   GET    /api/admin/auth-events?result=&source=&q=&before=   -> Page<AuthEvent>
  *   GET    /api/admin/auth-events/failed-ips?hours=            -> FailedIp[]
@@ -72,10 +76,10 @@
  *   GET    /api/mail/messages/:folder/:uid/raw  -> message/rfc822 (download)
  *   GET    /api/mail/messages/:folder/:uid/attachments/:partId  -> binary (Content-Disposition from attachment)
  *   POST   /api/mail/messages/flags             FlagRequest -> { ok }
- *   POST   /api/mail/messages/move              MoveRequest -> { ok }
- *   POST   /api/mail/messages/delete            DeleteRequest -> { ok }     (moves to Trash, or expunges if already in Trash)
+ *   POST   /api/mail/messages/move              MoveRequest -> MoveResult
+ *   POST   /api/mail/messages/delete            DeleteRequest -> MoveResult (moves to Trash, or expunges if already in Trash)
  *   POST   /api/mail/send                       multipart/form-data: "payload" (SendRequest JSON) + "files" -> { ok, messageId }
- *   PUT    /api/mail/drafts                     multipart/form-data: "payload" (DraftRequest JSON) + "files" -> { uid }
+ *   PUT    /api/mail/drafts                     multipart/form-data: "payload" (DraftRequest JSON) + "files" -> DraftResult
  *   GET    /api/mail/events                     text/event-stream: MailEvent
  *   GET    /api/mail/quota                      -> Quota
  *
@@ -214,6 +218,8 @@ export const SetupStatusSchema = z.object({
   hostname: z.string(),
   publicIp: z.string().nullable(),
   version: z.string(),
+  /** Set when the wizard already created the domain and admin but was not finished (e.g. the page was reloaded). */
+  createdDomainId: z.string().nullable(),
 });
 export type SetupStatus = z.infer<typeof SetupStatusSchema>;
 
@@ -436,6 +442,57 @@ export const LockoutSchema = z.object({
 });
 export type Lockout = z.infer<typeof LockoutSchema>;
 
+/** An IP address or network blocked from signing in to the web app, IMAP, POP3, SMTP and ManageSieve. */
+export const IpBanSchema = z.object({
+  id: z.string(),
+  network: z.string(), // "1.2.3.4" or "1.2.3.0/24"
+  reason: z.string().nullable(),
+  source: z.enum(["auto", "manual"]),
+  createdBy: z.string().nullable(), // admin email for manual bans
+  createdAt: z.string(),
+  expiresAt: z.string().nullable(), // null = permanent
+  liftedAt: z.string().nullable(),
+  liftedBy: z.string().nullable(),
+  hits: z.number(), // attempts turned away while the ban was active
+  lastHitAt: z.string().nullable(),
+  active: z.boolean(),
+});
+export type IpBan = z.infer<typeof IpBanSchema>;
+
+/** The rules that ban an address automatically, as configured on the server. */
+export const AutoBanPolicySchema = z.object({
+  enabled: z.boolean(),
+  windowMinutes: z.number(),
+  distinctAccounts: z.number(), // ban after failing for this many different accounts in the window
+  failures: z.number(), // or after this many failed attempts in total
+  durationHours: z.number(), // first ban; repeat offenders get 7x, then 30x
+  slowWindowHours: z.number(),
+  unknownFailures: z.number(), // ban after this many sign-ins to accounts that don't exist in the slow window (0 = off)
+  networkAddresses: z.number(), // this many such addresses in one /24 (or /64) ban the network (0 = off)
+});
+export type AutoBanPolicy = z.infer<typeof AutoBanPolicySchema>;
+
+export const IpBanListSchema = z.object({
+  bans: z.array(IpBanSchema),
+  allowlist: z.array(z.string()), // addresses/networks that are never banned automatically
+  policy: AutoBanPolicySchema,
+});
+export type IpBanList = z.infer<typeof IpBanListSchema>;
+
+const IP_OR_CIDR = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]*:[0-9a-f:.]*)(?:\/\d{1,3})?$/i;
+export const IpNetworkSchema = z.string().trim().toLowerCase().regex(IP_OR_CIDR, "Enter an IP address or a network like 203.0.113.0/24");
+
+export const IpBanCreateSchema = z.object({
+  network: IpNetworkSchema,
+  /** Hours until the ban ends; null bans permanently. */
+  hours: z.number().int().positive().max(24 * 3650).nullable(),
+  reason: z.string().trim().max(255).optional(),
+});
+export type IpBanCreate = z.infer<typeof IpBanCreateSchema>;
+
+export const IpAllowlistUpdateSchema = z.object({ allowlist: z.array(IpNetworkSchema).max(200) });
+export type IpAllowlistUpdate = z.infer<typeof IpAllowlistUpdateSchema>;
+
 // ---------------------------------------------------------------------------
 // Admin: activity & monitoring
 // ---------------------------------------------------------------------------
@@ -449,7 +506,7 @@ export type Page<T> = { items: T[]; nextCursor: string | null };
 export const AuthSourceSchema = z.enum(["web", "imap", "pop3", "smtp", "sieve", "other"]);
 export type AuthSource = z.infer<typeof AuthSourceSchema>;
 
-export const AuthFailureReasonSchema = z.enum(["wrong_password", "unknown_user", "disabled", "locked"]);
+export const AuthFailureReasonSchema = z.enum(["wrong_password", "unknown_user", "disabled", "locked", "banned"]);
 export type AuthFailureReason = z.infer<typeof AuthFailureReasonSchema>;
 
 /** Identical attempts close together are folded into one row; `count` says how many. */
@@ -475,6 +532,7 @@ export const FailedIpSchema = z.object({
   usernames: z.array(z.string()), // a few of the names tried
   sources: z.array(AuthSourceSchema),
   lastAt: z.string(),
+  banned: z.boolean(), // an active IP ban covers the address
 });
 export type FailedIp = z.infer<typeof FailedIpSchema>;
 
@@ -778,6 +836,13 @@ export const DeleteRequestSchema = z.object({
 });
 export type DeleteRequest = z.infer<typeof DeleteRequestSchema>;
 
+/** Where moved messages ended up, so the client can offer Undo. Empty for permanent deletes. */
+export const MoveResultSchema = z.object({
+  ok: z.literal(true),
+  moved: z.array(z.object({ from: MessageRefSchema, to: MessageRefSchema })),
+});
+export type MoveResult = z.infer<typeof MoveResultSchema>;
+
 export const RecipientSchema = z.object({
   name: z.string().max(200).default(""),
   address: EmailSchema,
@@ -798,6 +863,8 @@ export const SendRequestSchema = z.object({
   // Attachments carried over from an existing message (e.g. forwarding)
   forwardAttachments: z.array(z.object({ ref: MessageRefSchema, partId: z.string() })).default([]),
   requestReadReceipt: z.boolean().default(false),
+  // Threading headers to keep when there is no `inReplyTo` message to take them from (a reply reopened from Drafts)
+  threadHeaders: z.object({ inReplyTo: z.string().max(998), references: z.array(z.string().max(998)).max(100) }).nullable().default(null),
 });
 export type SendRequest = z.infer<typeof SendRequestSchema>;
 
@@ -806,6 +873,13 @@ export const DraftRequestSchema = SendRequestSchema.partial({ to: true }).extend
   draftUid: z.number().int().nullable().default(null), // existing draft to replace
 });
 export type DraftRequest = z.infer<typeof DraftRequestSchema>;
+
+/** The saved draft, and its attachments, which later saves carry over from the draft instead of uploading again. */
+export const DraftResultSchema = z.object({
+  uid: z.number(),
+  attachments: z.array(z.object({ ref: MessageRefSchema, partId: z.string(), filename: z.string(), size: z.number() })),
+});
+export type DraftResult = z.infer<typeof DraftResultSchema>;
 
 export const QuotaSchema = z.object({
   usedBytes: z.number(),
@@ -818,6 +892,10 @@ export const MailEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("expunge"), folder: z.string(), uid: z.number() }),
   z.object({ type: z.literal("flags"), folder: z.string(), uid: z.number(), flags: z.array(z.string()) }),
   z.object({ type: z.literal("folders") }),
+  /** Something changed in this folder that has no finer event (another folder, or an expunge without a uid). */
+  z.object({ type: z.literal("folder"), folder: z.string() }),
+  /** The stream is watching the mailbox; sent once per connection, after which the client resyncs. */
+  z.object({ type: z.literal("ready") }),
   z.object({ type: z.literal("ping") }),
 ]);
 export type MailEvent = z.infer<typeof MailEventSchema>;
@@ -830,6 +908,8 @@ const MAIL_EVENT_TYPE_KEYS = {
   expunge: true,
   flags: true,
   folders: true,
+  folder: true,
+  ready: true,
   ping: true,
 } as const satisfies Record<MailEvent["type"], true>;
 export const MAIL_EVENT_TYPES = Object.keys(MAIL_EVENT_TYPE_KEYS) as Array<MailEvent["type"]>;
@@ -855,7 +935,12 @@ export const ContactCreateSchema = z.object({
 });
 export type ContactCreate = z.infer<typeof ContactCreateSchema>;
 
-export const ContactUpdateSchema = ContactCreateSchema.partial();
+// Not ContactCreateSchema.partial(): its notes default would wipe the notes of every update that leaves them out.
+export const ContactUpdateSchema = z.object({
+  name: ContactCreateSchema.shape.name.optional(),
+  emails: ContactCreateSchema.shape.emails.optional(),
+  notes: z.string().max(5000).optional(),
+});
 export type ContactUpdate = z.infer<typeof ContactUpdateSchema>;
 
 export const AddressSuggestionSchema = z.object({

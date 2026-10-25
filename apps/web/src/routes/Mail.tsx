@@ -4,7 +4,7 @@ import { Archive, FolderInput, Inbox, Mail, MailOpen, MailX, PenLine, RotateCw, 
 import { formatBytes, type MessageRef, type ThreadSummary } from "@ionnet/shared";
 import { useFolders, useMe, useQuota, useThreads } from "@/lib/queries";
 import { cn, decodeFolder, encodeFolder } from "@/lib/utils";
-import { Button, Checkbox, EmptyState, ErrorState, IconButton, Menu, MenuItem, MenuLabel } from "@/components/ui";
+import { Button, Checkbox, ConfirmDialog, EmptyState, ErrorState, IconButton, Menu, MenuItem, MenuLabel } from "@/components/ui";
 import { FolderList } from "@/features/mail/FolderList";
 import { ThreadList } from "@/features/mail/ThreadList";
 import { ThreadView } from "@/features/mail/ThreadView";
@@ -17,6 +17,39 @@ function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+/**
+ * Pages are grouped into conversations one at a time, so a conversation that straddles a page boundary comes back
+ * on both pages under the same id. Fold those into one row (at the newer position) so ids stay unique and actions
+ * cover every loaded message.
+ */
+function mergePages(pages: ThreadSummary[][]): ThreadSummary[] {
+  const out: ThreadSummary[] = [];
+  const byId = new Map<string, number>();
+  for (const page of pages) {
+    for (const t of page) {
+      const at = byId.get(t.id);
+      if (at === undefined) {
+        byId.set(t.id, out.length);
+        out.push(t);
+        continue;
+      }
+      const a = out[at]!;
+      const newer = t.date > a.date ? t : a;
+      const seen = new Set(a.participants.map((p) => p.address.toLowerCase()));
+      out[at] = {
+        ...newer,
+        uids: [...new Set([...a.uids, ...t.uids])],
+        participants: [...a.participants, ...t.participants.filter((p) => !seen.has(p.address.toLowerCase()))],
+        unread: a.unread || t.unread,
+        flagged: a.flagged || t.flagged,
+        hasAttachments: a.hasAttachments || t.hasAttachments,
+        messageCount: a.messageCount + t.messageCount,
+      };
+    }
+  }
+  return out;
 }
 
 export function MailPage() {
@@ -36,8 +69,9 @@ export function MailPage() {
   const prefs = usePrefs();
   const drawerOpen = useDrawerOpen();
   const lastToggled = useRef<string | null>(null);
+  const [purgeIds, setPurgeIds] = useState<string[] | null>(null);
 
-  const list = useMemo(() => threads.data?.pages.flatMap((p) => p.threads) ?? [], [threads.data]);
+  const list = useMemo(() => mergePages(threads.data?.pages.map((p) => p.threads) ?? []), [threads.data]);
   const total = threads.data?.pages[0]?.total ?? 0;
   const currentFolder = folders?.find((f) => f.path === folder);
 
@@ -48,6 +82,15 @@ export function MailPage() {
   useEffect(() => {
     if (threadId) setFocusedId(threadId);
   }, [threadId]);
+  // Conversations that left the list (moved, deleted, or merged) must not stay selected.
+  useEffect(() => {
+    setSelected((s) => {
+      if (!s.size) return s;
+      const ids = new Set(list.map((t) => t.id));
+      const kept = [...s].filter((id) => ids.has(id));
+      return kept.length === s.size ? s : new Set(kept);
+    });
+  }, [list]);
 
   const goFolder = useCallback(
     (nextQ?: string) =>
@@ -114,7 +157,13 @@ export function MailPage() {
     },
     trash: () => {
       const ids = targetIds();
-      actions.trash(refsOf(ids), currentFolder?.specialUse === "trash");
+      if (!ids.length) return;
+      // Deleting from Trash can't be undone, so it asks first.
+      if (currentFolder?.specialUse === "trash") {
+        setPurgeIds(ids);
+        return;
+      }
+      actions.trash(refsOf(ids));
       afterBulk(ids);
     },
     read: (read: boolean) => {
@@ -223,7 +272,7 @@ export function MailPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, focusedId, threadId, selected, me, openThread, toggleSelect, closeThread]);
+  }, [list, focusedId, threadId, selected, me, folders, currentFolder, openThread, toggleSelect, closeThread]);
 
   const allSelected = list.length > 0 && selected.size === list.length;
   const someSelected = selected.size > 0 && !allSelected;
@@ -348,7 +397,11 @@ export function MailPage() {
                       }
                 }
                 onTrash={(t) => {
-                  actions.trash(refsFor(t), inTrash);
+                  if (inTrash) {
+                    setPurgeIds([t.id]);
+                    return;
+                  }
+                  actions.trash(refsFor(t));
                   afterBulk([t.id]);
                 }}
                 onDragStart={onDragStart}
@@ -382,6 +435,21 @@ export function MailPage() {
           )}
         </section>
       </div>
+      <ConfirmDialog
+        open={!!purgeIds}
+        onOpenChange={(o) => !o && setPurgeIds(null)}
+        title={purgeIds && purgeIds.length > 1 ? `Delete ${purgeIds.length} conversations permanently?` : "Delete permanently?"}
+        description="They are removed from the server for good. This can't be undone."
+        confirmLabel="Delete permanently"
+        danger
+        onConfirm={() => {
+          if (purgeIds) {
+            actions.trash(refsOf(purgeIds), true);
+            afterBulk(purgeIds);
+          }
+          setPurgeIds(null);
+        }}
+      />
     </div>
   );
 }

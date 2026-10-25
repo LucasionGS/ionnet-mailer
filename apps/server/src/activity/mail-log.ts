@@ -5,6 +5,7 @@ import { Domain, MailLogRow } from "../db/models.ts";
 import { sequelize } from "../db/sequelize.ts";
 import { likePattern, pageOf } from "./paging.ts";
 import { parseEvent, parseLine, sourceOf, type PostfixEvent } from "./postfix-parse.ts";
+import { recordBanHit } from "../auth/bans.ts";
 
 /** What we know about a queued message before its delivery lines arrive. */
 interface MessageContext {
@@ -179,7 +180,8 @@ async function apply(e: PostfixEvent, time: Date, syslogName: string): Promise<v
       context(e.qid, time).messageId = e.messageId;
       return;
     case "subject":
-      context(e.qid, time).subject = cleanSubject(e.subject);
+      // The message's own Subject comes first; never let a later one (an attached message) replace it.
+      context(e.qid, time).subject ??= cleanSubject(e.subject);
       return;
     case "queued": {
       const c = context(e.qid, time);
@@ -223,7 +225,9 @@ async function apply(e: PostfixEvent, time: Date, syslogName: string): Promise<v
     case "reject": {
       const rcpt = e.to ?? "";
       const ctx = e.qid ? (contexts.get(e.qid) ?? null) : null;
-      const source = sourceOf(syslogName);
+      // Content rejects (rspamd, END-OF-MESSAGE) are logged by cleanup under the plain "postfix" name; the listener
+      // that accepted the connection is in the message's context.
+      const source = ctx?.source ?? sourceOf(syslogName);
       await upsert({
         queueId: e.qid,
         recipient: rcpt,
@@ -245,10 +249,17 @@ async function apply(e: PostfixEvent, time: Date, syslogName: string): Promise<v
   }
 }
 
+// Example:
+// NOQUEUE: reject: CONNECT from unknown[203.0.113.7]: 554 5.7.1 <unknown[203.0.113.7]>: Client host rejected: Access denied: this address is blocked after repeated failed sign-ins; proto=SMTP
+const BAN_REJECT_RE = /reject: \w+ from [^[]*\[([^\]]+)\].*blocked after repeated failed sign-ins/;
+
 /** Feeds one line of Postfix's log into the mail log. */
 export async function ingestPostfixLine(line: string): Promise<void> {
   const l = parseLine(line);
   if (!l) return;
+  // Connections an IP ban turned away (docker/postfix/sql/client-access.cf) count as hits on that ban.
+  const banned = BAN_REJECT_RE.exec(l.message);
+  if (banned) await recordBanHit(banned[1]!);
   const e = parseEvent(l);
   if (e) await apply(e, l.time, l.syslogName);
 }

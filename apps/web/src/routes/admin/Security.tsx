@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { History, KeyRound, LockKeyhole, LockKeyholeOpen, LogOut, MonitorSmartphone } from "lucide-react";
+import { Ban, History, KeyRound, LockKeyhole, LockKeyholeOpen, LogOut, MonitorSmartphone } from "lucide-react";
 import type { AuthEvent, AuthFailureReason, AuthSource, WebSession } from "@ionnet/shared";
 import { useAudit, useAuthEvents, useDeleteLockout, useFailedIps, useLockouts, useRevokeSession, useWebSessions } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageSpinner, Select, Tooltip } from "@/components/ui";
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, IconButton, PageSpinner, Select, Tooltip } from "@/components/ui";
 import { Card, FilterBar, LoadMore, SearchInput, TabBar, Table, describeUserAgent, formatCount, fullTime, timeAgo, useNow } from "@/features/admin/kit";
 import { describeAudit } from "@/features/admin/audit";
+import { BanDialog, BansTab } from "@/features/admin/BansTab";
 import { AdminHeader } from "./AdminLayout";
 
-type Tab = "signins" | "lockouts" | "sessions" | "audit";
+type Tab = "signins" | "bans" | "lockouts" | "sessions" | "audit";
 export interface SecuritySearch {
   tab?: Tab;
   q?: string;
@@ -21,6 +22,7 @@ export interface SecuritySearch {
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "signins", label: "Sign-ins" },
+  { key: "bans", label: "Banned addresses" },
   { key: "lockouts", label: "Lockouts" },
   { key: "sessions", label: "Web sessions" },
   { key: "audit", label: "Audit log" },
@@ -28,6 +30,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 const DESCRIPTIONS: Record<Tab, string> = {
   signins: "Every password check: the web app, and IMAP, POP3, SMTP and ManageSieve through Dovecot.",
+  bans: "Addresses blocked from every sign-in (web, IMAP, POP3, SMTP and ManageSieve) for guessing passwords.",
   lockouts: "Addresses and accounts temporarily blocked from the web sign-in after too many failures.",
   sessions: "Browsers currently signed in to the web app.",
   audit: "Changes made in the admin area, and password changes.",
@@ -39,21 +42,33 @@ const REASON_LABEL: Record<AuthFailureReason, string> = {
   unknown_user: "No such account",
   disabled: "Account disabled",
   locked: "Locked out",
+  banned: "Address banned",
 };
 
 // ---- sign-ins ------------------------------------------------------------------------
-function FailedIpsCard({ onPick }: { onPick: (ip: string) => void }) {
+function FailedIpsCard({ onPick, onBan }: { onPick: (ip: string) => void; onBan: (ip: string) => void }) {
   const { data } = useFailedIps(24);
   if (!data?.length) return null;
   return (
     <Card title="Most failed attempts in the last 24 hours" bodyClassName="p-2">
       <div className="grid gap-x-4 sm:grid-cols-2">
         {data.slice(0, 8).map((ip) => (
-          <button key={ip.ip} type="button" onClick={() => onPick(ip.ip)} className="focus-ring flex items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-surface-2">
-            <span className="w-32 shrink-0 truncate font-mono text-xs">{ip.ip}</span>
-            <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">{ip.usernames.join(", ") || "no username"}</span>
-            <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCount(ip.failures)}</span>
-          </button>
+          <div key={ip.ip} className="flex items-center gap-1 rounded hover:bg-surface-2">
+            <button type="button" onClick={() => onPick(ip.ip)} className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded px-2 py-1.5 text-left">
+              <span className="w-32 shrink-0 truncate font-mono text-xs">{ip.ip}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">{ip.usernames.join(", ") || "no username"}</span>
+              <span className="shrink-0 text-sm font-semibold tabular-nums">{formatCount(ip.failures)}</span>
+            </button>
+            {ip.banned ? (
+              <Badge tone="warning" className="mr-1">
+                Banned
+              </Badge>
+            ) : (
+              <IconButton size="sm" tone="danger" label={`Ban ${ip.ip}`} onClick={() => onBan(ip.ip)}>
+                <Ban size={13} />
+              </IconButton>
+            )}
+          </div>
         ))}
       </div>
     </Card>
@@ -62,7 +77,7 @@ function FailedIpsCard({ onPick }: { onPick: (ip: string) => void }) {
 
 function ResultBadge({ e }: { e: AuthEvent }) {
   if (e.success) return <Badge tone="success">Signed in</Badge>;
-  return <Badge tone={e.reason === "locked" ? "warning" : "danger"}>{e.reason ? REASON_LABEL[e.reason] : "Failed"}</Badge>;
+  return <Badge tone={e.reason === "locked" || e.reason === "banned" ? "warning" : "danger"}>{e.reason ? REASON_LABEL[e.reason] : "Failed"}</Badge>;
 }
 
 function SignInsTab({ search, setSearch }: { search: SecuritySearch; setSearch: (s: Partial<SecuritySearch>) => void }) {
@@ -70,10 +85,12 @@ function SignInsTab({ search, setSearch }: { search: SecuritySearch; setSearch: 
   const now = useNow();
   const rows = data?.pages.flatMap((p) => p.items) ?? [];
   const filtered = !!(search.q || search.result || search.source);
+  const [banIp, setBanIp] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
-      {!filtered && <FailedIpsCard onPick={(ip) => setSearch({ q: ip })} />}
+      {!filtered && <FailedIpsCard onPick={(ip) => setSearch({ q: ip })} onBan={setBanIp} />}
+      {banIp && <BanDialog network={banIp} onClose={() => setBanIp(null)} />}
       <FilterBar>
         <SearchInput value={search.q ?? ""} onChange={(q) => setSearch({ q: q || undefined })} placeholder="Search account or IP address" className="w-full sm:w-72" />
         <Select
@@ -146,9 +163,16 @@ function SignInsTab({ search, setSearch }: { search: SecuritySearch; setSearch: 
                   </td>
                   <td className="max-w-0 min-w-40">
                     {e.ip ? (
-                      <button type="button" className="font-mono text-xs hover:text-accent hover:underline" onClick={() => setSearch({ q: e.ip! })} title="Show everything from this address">
-                        {e.ip}
-                      </button>
+                      <span className="inline-flex items-center gap-1">
+                        <button type="button" className="font-mono text-xs hover:text-accent hover:underline" onClick={() => setSearch({ q: e.ip! })} title="Show everything from this address">
+                          {e.ip}
+                        </button>
+                        {!e.success && e.reason !== "banned" && (
+                          <button type="button" className="focus-ring rounded p-0.5 text-fg-faint hover:text-danger" onClick={() => setBanIp(e.ip!)} aria-label={`Ban ${e.ip}`} title={`Ban ${e.ip}`}>
+                            <Ban size={12} />
+                          </button>
+                        )}
+                      </span>
                     ) : (
                       <span className="text-xs text-fg-faint">unknown</span>
                     )}
@@ -172,8 +196,8 @@ function LockoutsTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-fg-muted">
-        The web sign-in locks an account after 8 failed attempts, and an IP address after 20, within 15 minutes. A lockout lasts 15 minutes. Mail apps are
-        slowed down by Dovecot and Postfix instead and never appear here.
+        The web sign-in locks an account after 8 failed attempts, and an IP address after 20, within 15 minutes. A lockout lasts 15 minutes. Addresses that
+        keep guessing, in the web app or in mail apps, are banned for much longer; see Banned addresses.
       </p>
       {isLoading ? (
         <PageSpinner />
@@ -360,6 +384,7 @@ export function AdminSecurityPage() {
       <div className="scroll-thin flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl p-5" key={tab}>
           {tab === "signins" && <SignInsTab search={search} setSearch={setSearch} />}
+          {tab === "bans" && <BansTab />}
           {tab === "lockouts" && <LockoutsTab />}
           {tab === "sessions" && <SessionsTab />}
           {tab === "audit" && <AuditTab q={search.q ?? ""} setQ={(q) => setSearch({ q: q || undefined })} />}

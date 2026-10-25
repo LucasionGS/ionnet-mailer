@@ -127,6 +127,11 @@ export function draftInit(m: Message, me: Me): ComposerInit {
     html: body.html,
     signature: body.signature,
     draftUid: m.uid,
+    // Keep the draft's files (they are copied from the draft on the next save) and its place in a conversation.
+    forwardAttachments: m.attachments
+      .filter((a) => !a.inline)
+      .map((a) => ({ ref: { folder: m.folder, uid: m.uid }, partId: a.partId, filename: a.filename, size: a.size })),
+    threadHeaders: m.inReplyTo ? { inReplyTo: m.inReplyTo, references: m.references } : null,
     fromAddress: m.from && !sameAddress(m.from.address, me.email) && (me.sendAs ?? []).includes(m.from.address.toLowerCase()) ? m.from.address.toLowerCase() : null,
     original: m,
   };

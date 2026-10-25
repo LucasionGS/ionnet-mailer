@@ -6,7 +6,8 @@ import { logger } from "../logger.ts";
 import { HttpError } from "../errors.ts";
 
 const log = logger("imap");
-const IDLE_EVICT_MS = 10 * 60_000;
+// Below imapflow's 5-minute socket timeout: a pooled connection never IDLEs, so it would otherwise time out first.
+const IDLE_EVICT_MS = 4 * 60_000;
 
 type User = Pick<MailboxRow, "id" | "email">;
 
@@ -158,9 +159,30 @@ function translateImapError(err: unknown): unknown {
   return err;
 }
 
+/**
+ * Locks `folder` on a pooled connection and makes sure the session sees its current contents. Pooled connections
+ * don't IDLE, and Dovecot only shows a selected mailbox's new messages after a sync point, so a SEARCH on a folder
+ * that is already selected would miss mail that arrived since the last command.
+ */
+export async function lockFolder(client: ImapFlow, folder: string): Promise<{ release: () => void }> {
+  const alreadyOpen = client.mailbox && client.mailbox.path === folder;
+  const lock = await client.getMailboxLock(folder);
+  if (alreadyOpen) {
+    try {
+      await client.noop();
+    } catch (err) {
+      lock.release();
+      throw err;
+    }
+  }
+  return lock;
+}
+
 /** Opens a standalone connection (used for IDLE subscribers and one-off tasks). */
 export async function openDedicated(user: User, clientIp?: string): Promise<ImapFlow> {
-  const client = new ImapFlow({ ...imapOptions(user, clientIp), disableAutoIdle: false });
+  // QRESYNC makes expunge notifications carry the UID instead of only a sequence number. IDLE starts right after each
+  // command (imapflow waits 15s by default), since Dovecot only pushes new mail to a connection that is in IDLE.
+  const client = new ImapFlow({ ...imapOptions(user, clientIp), disableAutoIdle: false, autoIdleDelay: 300, qresync: true });
   client.on("error", (err) => log.debug(`dedicated connection error for ${user.email}: ${err.message}`));
   await client.connect();
   return client;

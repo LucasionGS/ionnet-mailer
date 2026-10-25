@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { HTTPException } from "hono/http-exception";
+import { DatabaseError, UniqueConstraintError } from "sequelize";
 import type { ApiError } from "@ionnet/shared";
 import type { AppEnv } from "./http/types.ts";
 import { attachClientIp } from "./http/middleware.ts";
@@ -56,6 +57,13 @@ export function createApp() {
     }
     if (err instanceof HTTPException) {
       return c.json({ error: "http_error", message: err.message } satisfies ApiError, err.status);
+    }
+    // An id that isn't a UUID can't name anything: that's a missing record, not a server error.
+    if (err instanceof DatabaseError && /invalid input syntax for type uuid/i.test(err.message)) {
+      return c.json({ error: "not_found", message: "Not found" } satisfies ApiError, 404);
+    }
+    if (err instanceof UniqueConstraintError) {
+      return c.json({ error: "conflict", message: "That already exists." } satisfies ApiError, 409);
     }
     log.error(`${c.req.method} ${c.req.path} failed`, err);
     return c.json({ error: "internal_error", message: config.isDev ? err.message : "Something went wrong" } satisfies ApiError, 500);

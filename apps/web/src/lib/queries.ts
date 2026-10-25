@@ -39,6 +39,9 @@ import type {
   FolderCreate,
   LoginRequest,
   Lockout,
+  IpBan,
+  IpBanCreate,
+  IpBanList,
   Mailbox,
   MailboxCreate,
   MailboxUpdate,
@@ -46,6 +49,7 @@ import type {
   Message,
   MessageRef,
   MoveRequest,
+  MoveResult,
   Ok,
   PasswordChange,
   ProfileUpdate,
@@ -78,6 +82,7 @@ export const qk = {
   setupSteps: ["admin", "setup-steps"] as const,
   status: ["admin", "status"] as const,
   lockouts: ["admin", "lockouts"] as const,
+  bans: (all: boolean) => ["admin", "bans", all] as const,
   overview: (range: OverviewRange) => ["admin", "overview", range] as const,
   authEvents: (f: AuthEventFilter) => ["admin", "auth-events", f] as const,
   failedIps: (hours: number) => ["admin", "failed-ips", hours] as const,
@@ -301,14 +306,14 @@ async function patchMailCache(
   });
 }
 
-function useMailMutation<B extends { messages: MessageRef[] }>(
+function useMailMutation<B extends { messages: MessageRef[] }, R = Ok>(
   path: string,
   threadFn: (body: B) => (t: ThreadSummary, hit: number[]) => ThreadSummary | null,
   messageFn: (body: B) => (m: Message) => Message | null,
 ) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: B) => api.post<Ok>(path, body),
+    mutationFn: (body: B) => api.post<R>(path, body),
     onMutate: (body) => patchMailCache(qc, body.messages, threadFn(body), messageFn(body)),
     // Success or failure, the server has the last word.
     onSettled: () => invalidateMail(qc),
@@ -344,14 +349,14 @@ export function useFlagMessages() {
   );
 }
 export function useMoveMessages() {
-  return useMailMutation<MoveRequest>(
+  return useMailMutation<MoveRequest, MoveResult>(
     "/api/mail/messages/move",
     () => dropFromThread,
     () => () => null,
   );
 }
 export function useDeleteMessages() {
-  return useMailMutation<DeleteRequest>(
+  return useMailMutation<DeleteRequest, MoveResult>(
     "/api/mail/messages/delete",
     () => dropFromThread,
     () => () => null,
@@ -552,6 +557,29 @@ export function useDeleteLockout() {
     mutationFn: (key: string) => api.del<Ok>(`/api/admin/lockouts/${encodeURIComponent(key)}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.lockouts }),
   });
+}
+
+export function useBans(all = false) {
+  return useQuery({ queryKey: qk.bans(all), queryFn: () => api.get<IpBanList>("/api/admin/bans", all ? { all: 1 } : {}), refetchInterval: 30_000 });
+}
+function useBanMutation<V, R>(fn: (v: V) => Promise<R>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "bans"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "auth-events"] });
+    },
+  });
+}
+export function useCreateBan() {
+  return useBanMutation((body: IpBanCreate) => api.post<IpBan>("/api/admin/bans", body));
+}
+export function useLiftBan() {
+  return useBanMutation((id: string) => api.del<Ok>(`/api/admin/bans/${encodeURIComponent(id)}`));
+}
+export function useSetAllowlist() {
+  return useBanMutation((allowlist: string[]) => api.put<IpBanList>("/api/admin/bans/allowlist", { allowlist }));
 }
 
 // ---- admin: monitoring -----------------------------------------------------

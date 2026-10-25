@@ -5,7 +5,7 @@ import type { DnsCheckResult, Overview, OverviewAlert, OverviewRange } from "@io
 import { formatBytes } from "@ionnet/shared";
 import { config } from "../config.ts";
 import { sequelize } from "../db/sequelize.ts";
-import { AliasRow, AuditRow, DnsCheckRow, Domain, MailboxRow, Session } from "../db/models.ts";
+import { AliasRow, AuditRow, DnsCheckRow, Domain, IpBanRow, MailboxRow, Session } from "../db/models.ts";
 import { cachedServerStatus } from "../status/status.ts";
 import { listLockouts } from "../auth/ratelimit.ts";
 import { getMailboxUsages } from "../mail/usage.ts";
@@ -218,7 +218,8 @@ export async function buildOverview(range: OverviewRange, tzParam: string | unde
     else if (cert.daysLeft < 0) alerts.push({ level: "danger", title: `TLS certificate expired ${-cert.daysLeft} days ago`, detail: "Mail clients refuse to connect. Check that ports 80/443 are reachable so Caddy can renew it.", href: "/admin/status" });
     else if (cert.daysLeft < 7) alerts.push({ level: "danger", title: `TLS certificate expires in ${cert.daysLeft} days`, detail: "Caddy should have renewed it by now; check that ports 80/443 are reachable.", href: "/admin/status" });
     else if (cert.daysLeft < 21) alerts.push({ level: "warning", title: `TLS certificate expires in ${cert.daysLeft} days`, detail: "Caddy renews automatically about 30 days before expiry.", href: "/admin/status" });
-    if (status.publicIp && !status.ptr.includes(status.hostname)) {
+    const sameHost = (h: string) => h.trim().toLowerCase().replace(/\.$/, "") === status.hostname.trim().toLowerCase().replace(/\.$/, "");
+    if (status.publicIp && !status.ptr.some(sameHost)) {
       alerts.push({
         level: "warning",
         title: "Reverse DNS does not match the hostname",
@@ -264,8 +265,8 @@ export async function buildOverview(range: OverviewRange, tzParam: string | unde
     });
   }
 
-  // Password guessing: one alert for every address with many failures today
-  const guessers = (ips24h ?? topIps).filter((x) => x.failures >= 20);
+  // Password guessing: one alert for every address with many failures today that no ban has stopped yet
+  const guessers = (ips24h ?? topIps).filter((x) => x.failures >= 20 && !x.banned);
   if (guessers.length) {
     const one = guessers.length === 1 ? guessers[0]! : null;
     alerts.push({
@@ -275,6 +276,15 @@ export async function buildOverview(range: OverviewRange, tzParam: string | unde
         ? `Tried ${one.usernames.slice(0, 3).join(", ") || "unknown accounts"} via ${one.sources.join(", ")}.`
         : guessers.map((g) => `${g.ip} (${g.failures})`).join(", "),
       href: one ? `/admin/security?tab=signins&q=${encodeURIComponent(one.ip)}` : "/admin/security?tab=signins&result=failed",
+    });
+  }
+  const newBans = await IpBanRow.count({ where: { source: "auto", createdAt: { [Op.gt]: new Date(Date.now() - 86_400_000) } } });
+  if (newBans) {
+    alerts.push({
+      level: "info",
+      title: `${newBans} ${newBans === 1 ? "address" : "addresses"} banned for password guessing in the last 24 hours`,
+      detail: "They can no longer sign in anywhere or connect over SMTP until the ban ends.",
+      href: "/admin/security?tab=bans",
     });
   }
   if (lockouts.length) alerts.push({ level: "info", title: `${lockouts.length} web ${lockouts.length === 1 ? "lockout" : "lockouts"} active`, detail: "Too many failed web sign-ins; they expire on their own.", href: "/admin/security?tab=lockouts" });

@@ -5,6 +5,8 @@ import {
   AuthSourceSchema,
   DomainCreateSchema,
   DomainUpdateSchema,
+  IpAllowlistUpdateSchema,
+  IpBanCreateSchema,
   LogLevelSchema,
   LogSourceSchema,
   MailboxCreateSchema,
@@ -23,6 +25,8 @@ import { parseJson } from "../http/validate.ts";
 import { AliasRow, Domain, MailboxRow } from "../db/models.ts";
 import { badRequest, notFound } from "../errors.ts";
 import { listLockouts, removeLockout } from "../auth/ratelimit.ts";
+import { forgetDisabledDomains } from "../auth/session.ts";
+import { createBan, displayNetwork, liftBan, listBans, networkContains, setAllowlist, toIpBanDto } from "../auth/bans.ts";
 import { cachedDomainDns } from "../dns/check.ts";
 import { syncSelectorMap } from "./dkim.ts";
 import {
@@ -87,6 +91,7 @@ adminRoutes.patch("/domains/:id", async (c) => {
   if (body.active !== undefined) {
     domain.active = body.active;
     await domain.save();
+    forgetDisabledDomains();
     await syncSelectorMap();
   }
   if (body.catchAll !== undefined) await setCatchAll(domain, body.catchAll);
@@ -221,6 +226,28 @@ adminRoutes.delete("/lockouts/:key", async (c) => {
   const key = decodeURIComponent(c.req.param("key"));
   await removeLockout(key);
   await audit(c, "lockout.remove", key);
+  return c.json({ ok: true });
+});
+
+adminRoutes.get("/bans", async (c) => c.json(await listBans(c.req.query("all") === "1")));
+adminRoutes.post("/bans", async (c) => {
+  const body = await parseJson(c, IpBanCreateSchema);
+  if (networkContains(body.network, c.get("clientIp"))) throw badRequest("That would ban the address you are signed in from.");
+  const ban = await createBan(body.network, body.hours, body.reason ?? null, c.get("user").email);
+  await audit(c, "ban.create", displayNetwork(ban.network), { hours: body.hours, ...(body.reason ? { reason: body.reason } : {}) });
+  return c.json(toIpBanDto(ban), 201);
+});
+// Registered before /bans/:id so "allowlist" is never taken for an id.
+adminRoutes.put("/bans/allowlist", async (c) => {
+  const { allowlist } = await parseJson(c, IpAllowlistUpdateSchema);
+  const saved = await setAllowlist(allowlist);
+  await audit(c, "ban.allowlist", null, { allowlist: saved });
+  return c.json(await listBans(false));
+});
+adminRoutes.delete("/bans/:id", async (c) => {
+  const ban = await liftBan(c.req.param("id"), c.get("user").email);
+  if (!ban) throw notFound("Ban not found");
+  await audit(c, "ban.lift", displayNetwork(ban.network));
   return c.json({ ok: true });
 });
 

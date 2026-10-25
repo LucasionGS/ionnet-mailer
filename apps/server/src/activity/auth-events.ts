@@ -4,6 +4,8 @@ import { AuthEventRow, MailboxRow } from "../db/models.ts";
 import { sequelize } from "../db/sequelize.ts";
 import { logger } from "../logger.ts";
 import { likePattern, pageOf } from "./paging.ts";
+import { evaluateAutoBan, isBanned } from "../auth/bans.ts";
+import { canSignIn } from "../auth/session.ts";
 
 const log = logger("auth-events");
 
@@ -22,8 +24,16 @@ export interface AuthAttempt {
   mailboxId?: string | null;
 }
 
-/** Never throws: a sign-in must not fail because its audit trail could not be written. */
+/**
+ * Never throws: a sign-in must not fail because its audit trail could not be written. Failures also feed the
+ * automatic IP ban (auth/bans.ts), which looks at the rows written here.
+ */
 export async function recordAuthEvent(a: AuthAttempt): Promise<void> {
+  await writeAuthEvent(a);
+  if (!a.success && a.reason !== "banned") await evaluateAutoBan(a.ip);
+}
+
+async function writeAuthEvent(a: AuthAttempt): Promise<void> {
   try {
     const username = a.username?.trim().toLowerCase().slice(0, 254) || null;
     const ip = a.ip && a.ip !== "unknown" ? a.ip.slice(0, 64) : null;
@@ -62,9 +72,9 @@ export async function recordAuthEvent(a: AuthAttempt): Promise<void> {
 
 /** Why a password check failed, judged from the account it named. */
 export async function failureReason(username: string | null): Promise<{ reason: AuthFailureReason; mailboxId: string | null }> {
-  const m = username ? await MailboxRow.findOne({ where: { email: username.trim().toLowerCase() }, attributes: ["id", "active"] }) : null;
+  const m = username ? await MailboxRow.findOne({ where: { email: username.trim().toLowerCase() }, attributes: ["id", "active", "domainId"] }) : null;
   if (!m) return { reason: "unknown_user", mailboxId: null };
-  return { reason: m.active ? "wrong_password" : "disabled", mailboxId: m.id };
+  return { reason: (await canSignIn(m)) ? "wrong_password" : "disabled", mailboxId: m.id };
 }
 
 export function toAuthEventDto(r: AuthEventRow): AuthEvent {
@@ -120,11 +130,14 @@ export async function failedIps(hours: number, limit = 10): Promise<FailedIp[]> 
       LIMIT :limit`,
     { replacements: { hours, limit }, type: QueryTypes.SELECT },
   );
-  return rows.map((r) => ({
-    ip: r.ip,
-    failures: r.failures,
-    usernames: r.usernames ?? [],
-    sources: r.sources as AuthSource[],
-    lastAt: new Date(r.last_at).toISOString(),
-  }));
+  return Promise.all(
+    rows.map(async (r) => ({
+      ip: r.ip,
+      failures: r.failures,
+      usernames: r.usernames ?? [],
+      sources: r.sources as AuthSource[],
+      lastAt: new Date(r.last_at).toISOString(),
+      banned: await isBanned(r.ip),
+    })),
+  );
 }

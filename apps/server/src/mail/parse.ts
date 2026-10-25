@@ -48,7 +48,9 @@ function header(email: Email, key: string): string | null {
 }
 
 function parseAuth(email: Email): Message["authentication"] {
-  const results = email.headers.filter((h) => h.key === "authentication-results").map((h) => h.value).join(";");
+  // rspamd appends its verdict after every header the message arrived with, so only the last Authentication-Results
+  // is this server's. Earlier ones were written by the sender (or hops we can't vouch for) and could claim anything.
+  const results = email.headers.filter((h) => h.key === "authentication-results").at(-1)?.value ?? "";
   const pick = (k: string) => results.match(new RegExp(`(?:^|[;\\s])${k}=([a-z]+)`, "i"))?.[1]?.toLowerCase() ?? null;
   let spamScore: number | null = null;
   const spamd = header(email, "x-spamd-result") ?? header(email, "x-spam-status") ?? "";
@@ -89,11 +91,9 @@ export async function parseRaw(raw: Buffer, folder: string, uid: number, flags: 
 
   let html = email.html ?? null;
   if (html) {
-    for (const att of attachments) {
-      if (att.contentId) {
-        html = html.split(`cid:${att.contentId}`).join(att.url);
-      }
-    }
+    // One pass with exact ids, so "cid:image1" never rewrites the start of "cid:image10".
+    const byCid = new Map(attachments.filter((a) => a.contentId).map((a) => [a.contentId!.toLowerCase(), a.url]));
+    if (byCid.size) html = html.replace(/cid:([^"'\s)>]+)/gi, (whole, id: string) => byCid.get(id.toLowerCase()) ?? byCid.get(safeDecode(id).toLowerCase()) ?? whole);
   }
   const hasRemoteContent = !!html && (REMOTE_RE.test(html) || CSS_URL_RE.test(html));
   const from = flattenAddresses(email.from ? [email.from] : [])[0] ?? null;
@@ -129,6 +129,14 @@ export async function parseRaw(raw: Buffer, folder: string, uid: number, flags: 
     authentication: parseAuth(email),
   };
   return { email, message, parts };
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
 }
 
 function extFor(contentType: string): string {

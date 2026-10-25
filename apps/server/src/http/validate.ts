@@ -15,10 +15,11 @@ export async function parseJson<T extends z.ZodType>(c: Context, schema: T): Pro
 export function parseWith<T extends z.ZodType>(schema: T, data: unknown): z.output<T> {
   const result = schema.safeParse(data);
   if (!result.success) {
-    throw badRequest(
-      "Validation failed",
-      result.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-    );
+    const issues = result.error.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+    // The client shows `message` as is, so it names the first problem rather than a bare "Validation failed".
+    const first = issues[0];
+    const message = first ? `${first.path ? `${first.path}: ` : ""}${first.message}${issues.length > 1 ? ` (and ${issues.length - 1} more)` : ""}` : "Validation failed";
+    throw badRequest(message, issues);
   }
   return result.data;
 }

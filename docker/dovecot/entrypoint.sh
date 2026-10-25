@@ -7,6 +7,24 @@ set -eu
 : "${POSTGRES_DB:=ionmailer}"
 : "${MAIL_NETWORK_SUBNET:=172.28.0.0/24}"
 
+# The compose subnet minus its gateway (the first host address), as CIDRs separated
+# by $2 (default a space). Docker's userland proxy forwards some connections (IPv6
+# clients when the network is IPv4-only, and host-local ones) from the gateway, so
+# trusting the whole subnet would trust arbitrary internet clients. The dev stack sets
+# TRUST_DOCKER_GATEWAY=1 so mail can be injected from the host.
+trusted_networks() {
+  if [ "${TRUST_DOCKER_GATEWAY:-0}" = "1" ]; then echo "$1"; return; fi
+  echo "$1" | awk -F'[./]' -v sep="${2:- }" '{
+    p = $5; net = (($1 * 256 + $2) * 256 + $3) * 256 + $4
+    size = 2 ^ (32 - p); net = net - (net % size); gw = net + 1
+    for (b = 32; b > p; b--) {
+      blk = 2 ^ (32 - b); sib = gw - (gw % blk)
+      sib = (int(sib / blk) % 2 == 0) ? sib + blk : sib - blk
+      printf "%s%d.%d.%d.%d/%d", (b < 32 ? sep : ""), int(sib / 16777216) % 256, int(sib / 65536) % 256, int(sib / 256) % 256, sib % 256, b
+    }
+  }'
+}
+
 mkdir -p /run/dovecot /srv/vmail
 chown vmail:vmail /srv/vmail
 
@@ -18,7 +36,7 @@ DOVEADM_PASSWORD=$(printf '%s' "doveadm:$DOVECOT_MASTER_PASSWORD" | sha256sum | 
 
 # Render the configuration template (secrets come from the environment).
 rm -rf /etc/dovecot/conf.d
-sed -e "s|@@MAIL_NETWORK_SUBNET@@|$MAIL_NETWORK_SUBNET|g" \
+sed -e "s|@@TRUSTED_NETWORKS@@|$(trusted_networks "$MAIL_NETWORK_SUBNET")|g" \
     -e "s|@@POSTGRES_DB@@|$POSTGRES_DB|g" \
     -e "s|@@MAIL_DB_PASSWORD@@|$MAIL_DB_PASSWORD|g" \
     -e "s|@@EVENTS_TOKEN@@|$EVENTS_TOKEN|g" \

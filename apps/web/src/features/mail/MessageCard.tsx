@@ -111,7 +111,11 @@ export function MessageCard(p: MessageCardProps) {
             {m.draft && <Badge tone="warning">Draft</Badge>}
             <span className="ml-auto shrink-0 text-xs text-fg-faint">
               <Tooltip content={formatDateLong(m.date)}>
-                <span>{p.expanded ? formatDateLong(m.date) : formatDateShort(m.date)}</span>
+                {/* On narrow screens the long date would squeeze the sender's name down to a letter. */}
+                <span>
+                  {p.expanded && <span className="hidden sm:inline">{formatDateLong(m.date)}</span>}
+                  <span className={cn(p.expanded && "sm:hidden")}>{formatDateShort(m.date)}</span>
+                </span>
               </Tooltip>
             </span>
           </div>
@@ -166,10 +170,10 @@ export function MessageCard(p: MessageCardProps) {
             <IconButton label="Reply (r)" size="sm" onClick={() => p.onReply(m)}>
               <Reply size={15} />
             </IconButton>
-            <IconButton label="Reply all (a)" size="sm" onClick={() => p.onReplyAll(m)}>
+            <IconButton label="Reply all (a)" size="sm" className="max-sm:hidden" onClick={() => p.onReplyAll(m)}>
               <ReplyAll size={15} />
             </IconButton>
-            <IconButton label="Forward (f)" size="sm" onClick={() => p.onForward(m)}>
+            <IconButton label="Forward (f)" size="sm" className="max-sm:hidden" onClick={() => p.onForward(m)}>
               <Forward size={15} />
             </IconButton>
             <Menu

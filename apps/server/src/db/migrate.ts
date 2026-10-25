@@ -32,7 +32,7 @@ export async function runMigrations(): Promise<void> {
   if (executed.length) log.info(`applied ${executed.length} migration(s): ${executed.map((m) => m.name).join(", ")}`);
   // Postfix and Dovecot read these tables through the read-only "mailreader" role.
   try {
-    await sequelize.query("GRANT SELECT ON domains, mailboxes, aliases TO mailreader");
+    await sequelize.query("GRANT SELECT ON domains, mailboxes, aliases, ip_bans TO mailreader");
   } catch (err) {
     log.warn(`could not grant SELECT to mailreader (role missing?): ${(err as Error).message}`);
   }

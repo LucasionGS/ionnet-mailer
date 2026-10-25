@@ -6,6 +6,8 @@ import { requireAuth } from "../http/middleware.ts";
 import { parseJson } from "../http/validate.ts";
 import { ContactRow, MailboxRow, RecentAddress } from "../db/models.ts";
 import { notFound } from "../errors.ts";
+import { sequelize } from "../db/sequelize.ts";
+import { likePattern } from "../activity/paging.ts";
 
 export const contactRoutes = new Hono<AppEnv>();
 contactRoutes.use("*", requireAuth);
@@ -24,15 +26,16 @@ contactRoutes.get("/", async (c) => {
   const q = (c.req.query("q") ?? "").trim().toLowerCase();
   const where: Record<string | symbol, unknown> = { mailboxId: c.get("user").id };
   if (q) {
+    const p = likePattern(q);
     where[Op.or as unknown as string] = [
-      { name: { [Op.iLike]: `%${q}%` } },
-      { emails: { [Op.overlap]: [q] } },
-      { notes: { [Op.iLike]: `%${q}%` } },
+      { name: { [Op.iLike]: p } },
+      // Partial addresses ("gmail") match too, not only a whole address.
+      sequelize.where(sequelize.fn("array_to_string", sequelize.col("emails"), " "), { [Op.iLike]: p }),
+      { notes: { [Op.iLike]: p } },
     ];
   }
   const rows = await ContactRow.findAll({ where, order: [["name", "ASC"]], limit: 500 });
-  const filtered = q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.emails.some((e) => e.includes(q)) || r.notes.toLowerCase().includes(q)) : rows;
-  return c.json(filtered.map(toDto));
+  return c.json(rows.map(toDto));
 });
 
 contactRoutes.get("/suggest", async (c) => {

@@ -50,7 +50,8 @@ export function SetupPage() {
   const { data: status, isLoading } = useSetupStatus();
   const qc = useQueryClient();
   const [step, setStep] = useState<Step>(0);
-  const [token, setToken] = useState("");
+  // The link printed in the server log carries the token (/setup?token=…).
+  const [token, setToken] = useState(() => new URLSearchParams(window.location.search).get("token") ?? "");
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -92,6 +93,13 @@ export function SetupPage() {
     setTokenError(null);
     try {
       await setupApi.verifyToken(token.trim());
+      // The domain and admin already exist from an earlier visit (the page was reloaded): continue after that step.
+      if (status?.createdDomainId) {
+        setDomainId(status.createdDomainId);
+        setStep(3);
+        setDns(await setupApi.dns(token.trim(), status.createdDomainId).catch(() => null));
+        return;
+      }
       setStep(1);
     } catch (err) {
       setTokenError(errorMessage(err));
@@ -197,7 +205,7 @@ export function SetupPage() {
                   To make sure only you can set up this server, enter the one-time setup token. It is printed in the
                   application container's log at startup. Run:
                 </p>
-                <pre className="mt-2 rounded-md bg-surface-2 p-3 font-mono text-xs">docker compose logs app | grep -A2 "SETUP TOKEN"</pre>
+                <pre className="mt-2 rounded-md bg-surface-2 p-3 font-mono text-xs">docker compose logs app | grep -A6 "not set up yet"</pre>
               </div>
               <Field label="Setup token" error={tokenError}>
                 <Input autoFocus value={token} onChange={(e) => setToken(e.target.value)} placeholder="Paste the token" required className="font-mono" />

@@ -58,6 +58,14 @@ export function describeAudit(a: AuditEntry): string {
       return `Deleted alias ${t}`;
     case "lockout.remove":
       return `Lifted the sign-in lockout for ${t.replace(/^(ip|user):/, "")}`;
+    case "ban.create":
+      return `Banned ${t} ${typeof d.hours === "number" ? `for ${d.hours} hour${d.hours === 1 ? "" : "s"}` : "permanently"}`;
+    case "ban.lift":
+      return `Lifted the ban on ${t}`;
+    case "ban.allowlist": {
+      const list = Array.isArray(d.allowlist) ? d.allowlist.map(String) : [];
+      return list.length ? `Set the ban allowlist to ${list.join(", ")}` : "Cleared the ban allowlist";
+    }
     case "session.revoke":
       return `Signed out a web session of ${t}`;
     case "queue.flush":
