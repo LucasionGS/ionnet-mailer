@@ -1,4 +1,14 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
+
+/** The server's package.json sits one level above both src/ (dev) and dist/ (production, started without npm). */
+function packageVersion(): string {
+  try {
+    return (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string }).version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
 
 const bool = z
   .string()
@@ -67,6 +77,6 @@ export const config = {
   ...parsed.data,
   isDev: parsed.data.NODE_ENV !== "production",
   publicUrl: parsed.data.PUBLIC_URL ?? `https://${parsed.data.MAIL_HOSTNAME}`,
-  version: process.env.npm_package_version ?? "0.1.0",
+  version: process.env.npm_package_version ?? packageVersion(),
 };
 export type Config = typeof config;
